@@ -134,3 +134,98 @@ fn aliases_are_supported() {
         Some("src/main.rs")
     );
 }
+
+fn run(root: &Path, command: &str, items: &[&str]) -> Result<Vec<String>, devx_core::DevxError> {
+    let ctx = Context::with_root(root);
+    FilesModule::new()
+        .execute(&ctx, command, &args(items))
+        .map(|output| output.lines)
+}
+
+#[test]
+fn new_creates_file_and_creates_parents() {
+    let dir = fixture();
+    let lines = execute(dir.path(), "new", &["a/b/c.txt"]);
+
+    assert_eq!(lines, vec!["créé: a/b/c.txt".to_string()]);
+    assert!(dir.path().join("a/b/c.txt").is_file());
+}
+
+#[test]
+fn new_errors_when_file_exists() {
+    let dir = fixture();
+    let err = run(dir.path(), "new", &["src/main.rs"]).unwrap_err();
+    assert!(matches!(err, devx_core::DevxError::Message(_)));
+}
+
+#[test]
+fn write_then_preview_roundtrip() {
+    let dir = fixture();
+    execute(dir.path(), "write", &["notes.txt", "hello", "world"]);
+
+    assert_eq!(
+        fs::read_to_string(dir.path().join("notes.txt")).unwrap(),
+        "hello world"
+    );
+    let lines = execute(dir.path(), "preview", &["notes.txt"]);
+    assert_eq!(lines, vec!["1: hello world".to_string()]);
+}
+
+#[test]
+fn rm_removes_file_and_errors_when_absent() {
+    let dir = fixture();
+    let lines = execute(dir.path(), "rm", &["ignored.txt"]);
+    assert_eq!(lines, vec!["supprimé: ignored.txt".to_string()]);
+    assert!(!dir.path().join("ignored.txt").exists());
+
+    let err = run(dir.path(), "rm", &["ignored.txt"]).unwrap_err();
+    assert!(matches!(err, devx_core::DevxError::Message(_)));
+}
+
+#[test]
+fn mkdir_creates_nested_directories() {
+    let dir = fixture();
+    let lines = execute(dir.path(), "mkdir", &["x/y/z"]);
+    assert_eq!(lines, vec!["dossier créé: x/y/z".to_string()]);
+    assert!(dir.path().join("x/y/z").is_dir());
+}
+
+#[test]
+fn ls_lists_directories_first() {
+    let dir = fixture();
+    let lines = execute(dir.path(), "ls", &[]);
+
+    let idx = |needle: &str| lines.iter().position(|line| line == needle);
+    let docs = idx("docs/").unwrap();
+    let src = idx("src/").unwrap();
+    let toml = idx("devx.toml").unwrap();
+    assert!(
+        docs < src && src < toml,
+        "ordre attendu (dossiers d'abord): {lines:?}"
+    );
+}
+
+#[test]
+fn ls_defaults_to_workspace_root_and_accepts_subdir() {
+    let dir = fixture();
+    let sub = execute(dir.path(), "ls", &["src"]);
+    assert!(sub.iter().any(|line| line == "main.rs"));
+    assert!(sub.iter().any(|line| line == "lib.rs"));
+    assert!(!sub.iter().any(|line| line == "src/"));
+}
+
+#[test]
+fn path_traversal_out_of_root_is_refused() {
+    let dir = fixture();
+    let err = run(dir.path(), "new", &["../escape.txt"]).unwrap_err();
+    assert!(matches!(err, devx_core::DevxError::InvalidArgs(_)));
+    let err = run(dir.path(), "write", &["a/../../etc/passwd", "x"]).unwrap_err();
+    assert!(matches!(err, devx_core::DevxError::InvalidArgs(_)));
+}
+
+#[test]
+fn absolute_path_is_refused() {
+    let dir = fixture();
+    let err = run(dir.path(), "new", &["/tmp/escape.txt"]).unwrap_err();
+    assert!(matches!(err, devx_core::DevxError::InvalidArgs(_)));
+}
