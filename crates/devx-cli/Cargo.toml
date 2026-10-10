@@ -16,4 +16,6 @@ path = "src/lib.rs"
 [dependencies]
 devx-core.workspace = true
 devx-tui.workspace = true
+devx-files.workspace = true
+devx-tools.workspace = true
 clap.workspace = true

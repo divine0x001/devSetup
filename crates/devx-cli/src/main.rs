@@ -4,8 +4,8 @@ use std::env;
 
 use clap::Parser;
 
-use devx_cli::{all_modules, classify, collect_specs, dispatch, Cli, Invocation};
-use devx_core::{Context, DevxError};
+use devx_cli::{all_modules, classify, collect_specs, dispatch, help_lines, Cli, Invocation};
+use devx_core::{Context, DevxError, Output};
 
 fn main() {
     let cli = Cli::parse();
@@ -28,7 +28,11 @@ fn run(cli: Cli) -> Result<(), DevxError> {
         }
         Invocation::Run { command, args } => {
             let ctx = Context::with_root(env::current_dir()?);
-            let output = dispatch(&modules, &ctx, &command, &args)?;
+            let output = if command == "help" {
+                Output::new(help_lines(&modules))
+            } else {
+                dispatch(&modules, &ctx, &command, &args)?
+            };
             for line in output.lines {
                 println!("{line}");
             }

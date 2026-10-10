@@ -59,9 +59,11 @@ pub fn classify(cli: Cli) -> Invocation {
 
 /// Registre de tous les modules disponibles.
 pub fn all_modules() -> Vec<Box<dyn Module>> {
-    let modules: Vec<Box<dyn Module>> = vec![Box::new(CoreModule::new())];
-    // INTEGRATION: l'orchestrateur ajoutera FilesModule + ToolsModule ici
-    modules
+    vec![
+        Box::new(CoreModule::new()),
+        Box::new(devx_files::FilesModule::new()),
+        Box::new(devx_tools::ToolsModule::new()),
+    ]
 }
 
 /// Rassemble les [`CommandSpec`] de tous les modules (palette TUI et aide).
@@ -70,6 +72,18 @@ pub fn collect_specs(modules: &[Box<dyn Module>]) -> Vec<CommandSpec> {
         .iter()
         .flat_map(|module| module.commands())
         .collect()
+}
+
+/// Aide complète : toutes les commandes, groupées par module.
+pub fn help_lines(modules: &[Box<dyn Module>]) -> Vec<String> {
+    let mut lines = vec!["devx — commandes disponibles :".to_string()];
+    for module in modules {
+        lines.push(format!("[{}]", module.name()));
+        for spec in module.commands() {
+            lines.push(format!("  {:<22} {}", spec.usage, spec.description));
+        }
+    }
+    lines
 }
 
 /// Route `command` vers le premier module qui la reconnaît.
@@ -210,5 +224,22 @@ mod tests {
     #[test]
     fn all_modules_exposes_core() {
         assert!(all_modules().iter().any(|module| module.name() == "core"));
+    }
+
+    #[test]
+    fn all_modules_exposes_files_and_tools() {
+        let names: Vec<&str> = all_modules().iter().map(|module| module.name()).collect();
+        assert!(names.contains(&"core"));
+        assert!(names.contains(&"files"));
+        assert!(names.contains(&"tools"));
+    }
+
+    #[test]
+    fn help_lists_every_module() {
+        let lines = help_lines(&all_modules());
+        let joined = lines.join("\n");
+        assert!(joined.contains("[core]"));
+        assert!(joined.contains("[files]"));
+        assert!(joined.contains("[tools]"));
     }
 }
