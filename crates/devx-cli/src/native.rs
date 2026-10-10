@@ -50,7 +50,6 @@ impl CoreModule {
         for spec in self.commands() {
             lines.push(format!("  {:<10} {}", spec.usage, spec.description));
         }
-        // INTEGRATION: l'orchestrateur ajoutera FilesModule + ToolsModule ici
         lines
     }
 }
