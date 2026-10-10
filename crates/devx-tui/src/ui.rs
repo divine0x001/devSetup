@@ -371,3 +371,81 @@ fn centered_rect(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
         ])
         .split(vertical[1])[1]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::Executor;
+    use devx_core::{CommandSpec, Context, Output};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    /// Rend l'UI dans un backend de test et renvoie l'écran sous forme de texte.
+    fn render(width: u16, height: u16) -> String {
+        let ctx = Context::with_root(".");
+        let specs = vec![
+            CommandSpec::new("tree", "arborescence", "tree"),
+            CommandSpec::new("grep", "chercher", "grep <motif>"),
+            CommandSpec::new("git", "git", "git <args>"),
+        ];
+        let exec: Executor = Box::new(|_c, _cmd, _args| Ok(Output::empty()));
+        let mut app = App::new(ctx, specs, exec, None);
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let mut out = String::new();
+        for y in 0..height {
+            for x in 0..width {
+                out.push_str(buffer[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    #[test]
+    fn renders_ide_layout() {
+        let screen = render(100, 30);
+        assert!(screen.contains("Fichiers"), "arbre manquant:\n{screen}");
+        assert!(screen.contains("Éditeur"), "éditeur manquant:\n{screen}");
+        assert!(screen.contains("Sortie"), "sortie manquante:\n{screen}");
+        assert!(
+            screen.contains("Commande"),
+            "barre de commande manquante:\n{screen}"
+        );
+        assert!(
+            screen.contains("devx"),
+            "barre de statut manquante:\n{screen}"
+        );
+        assert!(
+            screen.contains("commandes"),
+            "compteur de commandes manquant:\n{screen}"
+        );
+    }
+
+    #[test]
+    fn renders_palette_overlay() {
+        let ctx = Context::with_root(".");
+        let specs = vec![CommandSpec::new("tree", "arborescence", "tree")];
+        let exec: Executor = Box::new(|_c, _cmd, _args| Ok(Output::empty()));
+        let mut app = App::new(ctx, specs, exec, None);
+        app.mode = Mode::Palette;
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let mut screen = String::new();
+        for y in 0..30 {
+            for x in 0..100 {
+                screen.push_str(buffer[(x, y)].symbol());
+            }
+            screen.push('\n');
+        }
+        assert!(
+            screen.contains("Palette de commandes"),
+            "palette manquante:\n{screen}"
+        );
+        assert!(
+            screen.contains("tree"),
+            "commande absente de la palette:\n{screen}"
+        );
+    }
+}
