@@ -1,21 +1,26 @@
 //! # devx-tui
 //!
-//! Shell terminal interactif pour `devx`, construit sur `ratatui` + `crossterm`.
+//! IDE terminal pour `devx`, construit sur `ratatui` + `crossterm`.
 //!
-//! - Colonne gauche : arbre de fichiers scanné depuis `ctx.workspace.root`.
-//! - Zone centrale : sortie / prévisualisation des commandes.
-//! - Barre de commande (bas) avec autocomplétion.
-//! - Barre de statut (haut).
-//! - Palette de commandes (`Ctrl-P`) listant les [`CommandSpec`] de l'hôte.
+//! - Barre de statut (haut) : mode, fichier courant, position ligne:colonne,
+//!   indicateur de modification.
+//! - Corps : arbre de fichiers (gauche) | éditeur (centre) ; panneau de sortie
+//!   (bas) pour les commandes de modules.
+//! - Barre de commande (bas) : mode `:` (`:help`, `:w`, `:q`, `:wq`, `:q!`,
+//!   `:e <fichier>`, ou toute commande de module dispatchée via l'hôte).
+//! - Palette `Ctrl-P` listant les [`CommandSpec`] de l'hôte.
 //!
 //! Le terminal est toujours restauré, y compris en cas d'erreur (garde RAII).
 
 mod app;
+mod editor;
 mod ui;
 
-pub use app::{matching_commands, App, Executor, Mode, Node, Visible};
+pub use app::{matching_commands, parse_command_line, App, Executor, Focus, Mode, Node, Visible};
+pub use editor::Buffer;
 
 use std::io::{self, Stdout};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crossterm::{
@@ -27,17 +32,29 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 
 use devx_core::{CommandSpec, Context, DevxError};
 
-/// Lance la boucle d'évènements de la TUI.
-///
-/// `specs` alimente la palette `Ctrl-P`, `exec` exécute les commandes saisies.
-/// Retourne lorsque l'utilisateur quitte (`q` ou `Ctrl-C`).
+/// Lance la TUI en mode classique (sans fichier initial). Équivalent de
+/// [`run_ide`] avec `initial_file = None`.
 pub fn run(ctx: Context, specs: Vec<CommandSpec>, exec: Executor) -> Result<(), DevxError> {
+    run_ide(ctx, specs, exec, None)
+}
+
+/// Lance l'IDE avec un éventuel fichier déjà ouvert dans l'éditeur.
+///
+/// `specs` alimente la palette `Ctrl-P`, `exec` exécute les commandes de
+/// modules saisies dans le mode `:`. Retourne lorsque l'utilisateur quitte
+/// (`q` depuis l'arbre, `Ctrl-C`, `:q`, `:wq`, `:q!`).
+pub fn run_ide(
+    ctx: Context,
+    specs: Vec<CommandSpec>,
+    exec: Executor,
+    initial_file: Option<PathBuf>,
+) -> Result<(), DevxError> {
     let _guard = TerminalGuard::enter()?;
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal: Terminal<CrosstermBackend<Stdout>> =
         Terminal::new(backend).map_err(to_err)?;
 
-    let mut app = App::new(ctx, specs, exec);
+    let mut app = App::new(ctx, specs, exec, initial_file);
 
     while !app.should_quit {
         terminal

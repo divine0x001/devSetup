@@ -171,6 +171,30 @@ mod tests {
     }
 
     #[test]
+    fn edit_without_file_carries_no_args() {
+        let cli = Cli::try_parse_from(["devx", "edit"]).unwrap();
+        assert_eq!(
+            classify(cli),
+            Invocation::Run {
+                command: "edit".to_string(),
+                args: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn edit_with_file_carries_it_as_arg() {
+        let cli = Cli::try_parse_from(["devx", "edit", "src/main.rs"]).unwrap();
+        assert_eq!(
+            classify(cli),
+            Invocation::Run {
+                command: "edit".to_string(),
+                args: vec!["src/main.rs".to_string()],
+            }
+        );
+    }
+
+    #[test]
     fn trailing_hyphen_args_are_allowed() {
         let cli = Cli::try_parse_from(["devx", "echo", "--foo", "-x"]).unwrap();
         assert_eq!(
