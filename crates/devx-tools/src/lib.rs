@@ -7,6 +7,9 @@
 //! - `run <task>` : exécute une tâche déclarée dans `devx.toml`.
 //! - `snip list|add|get` : snippets persistés dans `.devx/snippets.json`.
 //! - `session save|load` : sessions persistées dans `.devx/sessions/<name>.json`.
+//! - `replace <pattern> <replacement>` : remplacement regex projet-wide
+//!   (respecte `.gitignore`, ignore les binaires).
+//! - `outline <file>` : symboles de premier niveau d'un fichier source.
 //!
 //! Aucune logique TUI n'est présente ici : uniquement de la logique pure et des
 //! appels `std::process::Command`.
@@ -14,6 +17,8 @@
 #![forbid(unsafe_code)]
 
 mod git;
+mod outline;
+mod replace;
 mod run;
 mod session;
 mod snip;
@@ -64,6 +69,18 @@ impl Module for ToolsModule {
                 "session <save <name> [file...]|load <name>>",
             )
             .with_aliases(["sess"]),
+            CommandSpec::new(
+                "replace",
+                "Remplacement regex projet-wide (respecte .gitignore, ignore les binaires)",
+                "replace <pattern> <replacement>",
+            )
+            .with_aliases(["sub"]),
+            CommandSpec::new(
+                "outline",
+                "Liste les symboles de premier niveau d'un fichier source",
+                "outline <file>",
+            )
+            .with_aliases(["symbols"]),
         ]
     }
 
@@ -73,6 +90,8 @@ impl Module for ToolsModule {
             "run" => run::execute(ctx, args),
             "snip" | "snippet" => snip::execute(ctx, args),
             "session" | "sess" => session::execute(ctx, args),
+            "replace" | "sub" => replace::execute(ctx, args),
+            "outline" | "symbols" => outline::execute(ctx, args),
             other => Err(DevxError::unknown_command(other)),
         }
     }
@@ -98,7 +117,10 @@ mod tests {
             .into_iter()
             .map(|c| c.name)
             .collect();
-        assert_eq!(names, vec!["git", "run", "snip", "session"]);
+        assert_eq!(
+            names,
+            vec!["git", "run", "snip", "session", "replace", "outline"]
+        );
     }
 
     #[test]
