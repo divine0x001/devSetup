@@ -55,6 +55,28 @@ pub enum Mode {
     Palette,
 }
 
+/// Vue principale affichée par l'IDE.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum View {
+    /// Vue « code » : arbre de fichiers + éditeur (vue par défaut).
+    Code,
+    /// Vue « git » : branche, statut et derniers commits.
+    Git,
+}
+
+/// Informations git affichées dans la vue « git ».
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GitState {
+    /// Branche courante (ou « HEAD » si détaché).
+    pub branch: String,
+    /// Lignes de `git status --short --branch`.
+    pub status: Vec<String>,
+    /// Lignes de `git log --oneline`.
+    pub log: Vec<String>,
+    /// Message d'erreur éventuel (hors dépôt git, git absent…).
+    pub error: Option<String>,
+}
+
 /// Nœud de l'arbre de fichiers du workspace.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Node {
@@ -113,6 +135,10 @@ pub struct App {
     pub palette_selected: usize,
     /// Message de statut.
     pub status: String,
+    /// Vue principale courante.
+    pub view: View,
+    /// Informations git (vue « git »).
+    pub git: GitState,
     executor: Executor,
 }
 
@@ -168,6 +194,8 @@ impl App {
             input: String::new(),
             palette_selected: 0,
             status: "prêt".to_string(),
+            view: View::Code,
+            git: GitState::default(),
             executor,
         }
     }

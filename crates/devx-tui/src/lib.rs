@@ -16,7 +16,10 @@ mod app;
 mod editor;
 mod ui;
 
-pub use app::{matching_commands, parse_command_line, App, Executor, Focus, Mode, Node, Visible};
+pub use app::{
+    matching_commands, parse_command_line, App, Executor, Focus, GitState, Mode, Node, View,
+    Visible,
+};
 pub use editor::Buffer;
 
 use std::io::{self, Stdout};
