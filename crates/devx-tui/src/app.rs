@@ -597,7 +597,6 @@ fn scan_dir(dir: &Path, depth: usize, budget: &mut usize) -> Vec<Node> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use devx_core::{Config, Workspace};
 
     fn specs() -> Vec<CommandSpec> {
         vec![
