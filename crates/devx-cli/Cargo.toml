@@ -1,0 +1,19 @@
+[package]
+name = "devx-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Binaire devx : mode TUI et exécution one-shot des commandes."
+
+[[bin]]
+name = "devx"
+path = "src/main.rs"
+
+[lib]
+name = "devx_cli"
+path = "src/lib.rs"
+
+[dependencies]
+devx-core.workspace = true
+devx-tui.workspace = true
+clap.workspace = true
