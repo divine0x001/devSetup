@@ -1,0 +1,13 @@
+[package]
+name = "devx-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Contrat figé du projet devx : types partagés et trait Module."
+
+[dependencies]
+serde = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
