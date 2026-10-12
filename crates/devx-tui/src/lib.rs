@@ -27,7 +27,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crossterm::{
-    event::{self, Event},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -65,8 +65,10 @@ pub fn run_ide(
             .map_err(to_err)?;
 
         if event::poll(Duration::from_millis(200)).map_err(to_err)? {
-            if let Event::Key(key) = event::read().map_err(to_err)? {
-                app.on_key(key);
+            match event::read().map_err(to_err)? {
+                Event::Key(key) => app.on_key(key),
+                Event::Mouse(mouse) => app.on_mouse(mouse),
+                _ => {}
             }
         }
     }
@@ -86,7 +88,7 @@ struct TerminalGuard;
 impl TerminalGuard {
     fn enter() -> Result<Self, DevxError> {
         enable_raw_mode().map_err(to_err)?;
-        execute!(io::stdout(), EnterAlternateScreen).map_err(to_err)?;
+        execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture).map_err(to_err)?;
         Ok(Self)
     }
 }
@@ -94,6 +96,6 @@ impl TerminalGuard {
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        let _ = execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
     }
 }

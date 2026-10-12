@@ -1,2 +1,6 @@
 /target
 **/*.rs.bk
+.build/
+.swiftpm/
+DerivedData/
+

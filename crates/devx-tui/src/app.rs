@@ -2,11 +2,18 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use devx_core::{CommandSpec, Context, DevxError, Output};
+use ratatui::layout::Rect;
 
 use crate::editor::Buffer;
+
+/// Largeur (en cellules) de la gouttière de numéros de ligne dans l'éditeur.
+pub const EDITOR_GUTTER: usize = 6;
 
 /// Callback d'exécution de commande fourni par l'hôte (le binaire `devx`).
 ///
@@ -23,7 +30,7 @@ const MAX_ENTRIES: usize = 20_000;
 const IGNORED_DIRS: [&str; 3] = [".git", "target", "node_modules"];
 
 /// Commandes éditeur disponibles dans le mode `:` (nom, description).
-const EDITOR_COMMANDS: [(&str, &str); 6] = [
+const EDITOR_COMMANDS: [(&str, &str); 8] = [
     (":help", "liste toutes les commandes disponibles"),
     (":w", "sauvegarde le fichier courant"),
     (":wq", "sauvegarde puis quitte"),
@@ -33,6 +40,8 @@ const EDITOR_COMMANDS: [(&str, &str); 6] = [
         ":e <fichier>",
         "ouvre un fichier et passe le focus à l'éditeur",
     ),
+    (":git", "affiche un rapport git à la place du code"),
+    (":code", "revient à la vue code (arbre + éditeur)"),
 ];
 
 /// Paneau qui reçoit les frappes de navigation.
@@ -109,6 +118,21 @@ pub struct Visible {
     pub has_children: bool,
 }
 
+/// Géométrie du dernier rendu, utilisée pour la souris (carte de zones).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LayoutInfo {
+    /// Zone de l'arbre de fichiers.
+    pub tree: Rect,
+    /// Défilement vertical appliqué à l'arbre.
+    pub tree_offset: usize,
+    /// Zone de l'éditeur (cadre compris).
+    pub editor: Rect,
+    /// Défilement vertical de l'éditeur.
+    pub editor_y_offset: usize,
+    /// Défilement horizontal de l'éditeur.
+    pub editor_x_offset: usize,
+}
+
 /// État complet de l'application TUI (IDE).
 pub struct App {
     /// Contexte d'exécution (workspace + config).
@@ -139,6 +163,8 @@ pub struct App {
     pub view: View,
     /// Informations git (vue « git »).
     pub git: GitState,
+    /// Géométrie du dernier rendu (carte pour la souris).
+    pub layout: LayoutInfo,
     executor: Executor,
 }
 
@@ -196,6 +222,7 @@ impl App {
             status: "prêt".to_string(),
             view: View::Code,
             git: GitState::default(),
+            layout: LayoutInfo::default(),
             executor,
         }
     }
@@ -253,6 +280,10 @@ impl App {
                     }
                     return;
                 }
+                KeyCode::Char('g') => {
+                    self.toggle_view();
+                    return;
+                }
                 _ => {}
             }
         }
@@ -284,6 +315,109 @@ impl App {
             Focus::Tree => "focus: arbre de fichiers".to_string(),
             Focus::Editor => "focus: éditeur".to_string(),
         };
+    }
+
+    /// Traite un événement souris (clic, molette).
+    pub fn on_mouse(&mut self, mouse: MouseEvent) {
+        if self.mode != Mode::Normal {
+            return;
+        }
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => self.on_left_click(mouse.column, mouse.row),
+            MouseEventKind::ScrollUp => self.on_scroll(mouse.column, mouse.row, -1),
+            MouseEventKind::ScrollDown => self.on_scroll(mouse.column, mouse.row, 1),
+            _ => {}
+        }
+    }
+
+    fn on_left_click(&mut self, x: u16, y: u16) {
+        if inside(self.layout.tree, x, y) {
+            self.on_tree_click(x, y);
+        } else if inside(self.layout.editor, x, y) {
+            self.on_editor_click(x, y);
+        }
+    }
+
+    pub fn on_scroll(&mut self, x: u16, y: u16, delta: i32) {
+        if inside(self.layout.editor, x, y) {
+            for _ in 0..delta.abs() {
+                if delta < 0 {
+                    self.editor.move_up();
+                } else {
+                    self.editor.move_down();
+                }
+            }
+            self.focus = Focus::Editor;
+        } else if inside(self.layout.tree, x, y) {
+            let len = self.visible().len();
+            if len == 0 {
+                return;
+            }
+            let next = self.selection as i32 + delta;
+            self.selection = next.clamp(0, len as i32 - 1) as usize;
+        }
+    }
+
+    fn on_tree_click(&mut self, _x: u16, y: u16) {
+        let area = self.layout.tree;
+        let inner_y = area.y as usize + 1;
+        if (y as usize) < inner_y {
+            return;
+        }
+        let row = (y as usize - inner_y) + self.layout.tree_offset;
+        if row >= self.visible().len() {
+            return;
+        }
+        self.selection = row;
+        self.focus = Focus::Tree;
+        self.open_selected();
+    }
+
+    /// Place le curseur de l'éditeur sur le caractère cliqué.
+    fn on_editor_click(&mut self, x: u16, y: u16) {
+        let area = self.layout.editor;
+        let origin_x = area.x as i32 + 1 + EDITOR_GUTTER as i32;
+        let origin_y = area.y as i32 + 1;
+        let rel_x = x as i32 - origin_x;
+        let rel_y = y as i32 - origin_y;
+        if rel_y < 0 {
+            return;
+        }
+        let last_row = self.editor.lines.len().saturating_sub(1);
+        let row = ((rel_y as usize) + self.layout.editor_y_offset).min(last_row);
+        let col_vis = if rel_x < 0 { 0 } else { rel_x as usize };
+        let line_len = self.editor.lines[row].chars().count();
+        let col = (col_vis + self.layout.editor_x_offset).min(line_len);
+        self.editor.cursor_row = row;
+        self.editor.cursor_col = col;
+        self.focus = Focus::Editor;
+        self.status = format!("curseur {}:{}", row + 1, col + 1);
+    }
+
+    /// Bascule entre la vue code et la vue git (Ctrl-G).
+    pub fn toggle_view(&mut self) {
+        match self.view {
+            View::Code => self.open_git_view(),
+            View::Git => self.open_code_view(),
+        }
+    }
+
+    /// Affiche la vue git (recharge le rapport).
+    pub fn open_git_view(&mut self) {
+        self.refresh_git();
+        self.view = View::Git;
+        self.status = "vue git".to_string();
+    }
+
+    /// Revient à la vue code.
+    pub fn open_code_view(&mut self) {
+        self.view = View::Code;
+        self.status = "vue code".to_string();
+    }
+
+    /// Recharge l'état git depuis le workspace.
+    pub fn refresh_git(&mut self) {
+        self.git = load_git(&self.ctx.workspace.root);
     }
 
     fn on_key_tree(&mut self, key: KeyEvent) {
@@ -477,6 +611,14 @@ impl App {
                 self.should_quit = true;
                 true
             }
+            "git" => {
+                self.open_git_view();
+                true
+            }
+            "code" => {
+                self.open_code_view();
+                true
+            }
             "e" => {
                 match args.first() {
                     Some(file) => {
@@ -521,6 +663,70 @@ impl App {
             }
         }
     }
+}
+
+/// Vrai si la position `(x, y)` tombe dans `area` (bordure comprise).
+fn inside(area: Rect, x: u16, y: u16) -> bool {
+    area.width > 0
+        && area.height > 0
+        && x >= area.x
+        && x < area.x + area.width
+        && y >= area.y
+        && y < area.y + area.height
+}
+
+/// Lance `git <args>` dans `root` et renvoie la sortie standard (texte).
+fn git_capture(root: &Path, args: &[&str]) -> Result<String, String> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("git introuvable : {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let detail = stderr.trim();
+        return Err(if detail.is_empty() {
+            format!("`git {}` a échoué", args.join(" "))
+        } else {
+            detail.to_string()
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Construit l'état git (branche, statut, derniers commits) pour `root`.
+pub fn load_git(root: &Path) -> GitState {
+    let mut state = GitState {
+        branch: "HEAD".to_string(),
+        ..GitState::default()
+    };
+
+    let status = match git_capture(root, &["status", "--short", "--branch"]) {
+        Ok(text) => text,
+        Err(err) => {
+            state.error = Some(err);
+            return state;
+        }
+    };
+
+    let mut lines = status.lines();
+    if let Some(first) = lines.next() {
+        let head = first.trim_start_matches("## ").trim();
+        let name = head.split("...").next().unwrap_or(head);
+        let name = name.split_whitespace().next().unwrap_or("HEAD");
+        state.branch = if name.is_empty() {
+            "HEAD".to_string()
+        } else {
+            name.to_string()
+        };
+    }
+    state.status = lines.map(|l| l.to_string()).collect();
+
+    state.log = git_capture(root, &["log", "--oneline", "-n", "20"])
+        .map(|text| text.lines().map(str::to_string).collect())
+        .unwrap_or_default();
+
+    state
 }
 
 /// Découpe une ligne de commande `:` en (commande, arguments).
@@ -769,5 +975,120 @@ mod tests {
     fn context_is_used_for_root() {
         let app = app();
         assert_eq!(app.ctx.workspace.root, PathBuf::from("."));
+    }
+
+    // --- vues code/git (`:git`, `:code`, Ctrl-G) ---
+
+    #[test]
+    fn git_command_switches_to_git_view() {
+        let mut app = app();
+        app.input = "git".to_string();
+        app.submit();
+        assert_eq!(app.view, View::Git);
+    }
+
+    #[test]
+    fn code_command_returns_to_code_view() {
+        let mut app = app();
+        app.open_git_view();
+        app.input = "code".to_string();
+        app.submit();
+        assert_eq!(app.view, View::Code);
+    }
+
+    #[test]
+    fn toggle_view_round_trips() {
+        let mut app = app();
+        app.toggle_view();
+        assert_eq!(app.view, View::Git);
+        app.toggle_view();
+        assert_eq!(app.view, View::Code);
+    }
+
+    #[test]
+    fn load_git_reports_error_outside_repo() {
+        let dir = std::env::temp_dir().join(format!("devx-tui-nogit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let state = load_git(&dir);
+        // Hors dépôt : soit une erreur explicite, soit pas de branche utile.
+        assert!(state.error.is_some() || state.branch == "HEAD");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- souris ---
+
+    #[test]
+    fn editor_click_places_cursor() {
+        let mut app = app();
+        app.editor.lines = vec!["hello".to_string(), "world".to_string()];
+        app.layout.editor = Rect::new(10, 5, 40, 10);
+        app.layout.editor_y_offset = 0;
+        app.layout.editor_x_offset = 0;
+        // origin_x = 10 + 1 + 6 = 17 ; origin_y = 5 + 1 = 6.
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 19,
+            row: 7,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.focus, Focus::Editor);
+        assert_eq!(app.editor.cursor_row, 1);
+        assert_eq!(app.editor.cursor_col, 2);
+    }
+
+    #[test]
+    fn editor_click_clamps_past_end_of_line() {
+        let mut app = app();
+        app.editor.lines = vec!["hi".to_string()];
+        app.layout.editor = Rect::new(0, 0, 40, 10);
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 30,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.editor.cursor_row, 0);
+        assert_eq!(app.editor.cursor_col, 2);
+    }
+
+    #[test]
+    fn scroll_over_editor_moves_cursor() {
+        let mut app = app();
+        app.editor.lines = vec![
+            "a".to_string(),
+            "b".to_string(),
+            "c".to_string(),
+            "d".to_string(),
+        ];
+        app.layout.editor = Rect::new(0, 0, 40, 10);
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 5,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.editor.cursor_row, 1);
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::ScrollUp,
+            column: 5,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.editor.cursor_row, 0);
+    }
+
+    #[test]
+    fn mouse_ignored_in_command_mode() {
+        let mut app = app();
+        app.mode = Mode::Command;
+        app.editor.lines = vec!["hello".to_string()];
+        app.layout.editor = Rect::new(0, 0, 40, 10);
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 8,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.focus, Focus::Tree);
     }
 }

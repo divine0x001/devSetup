@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{App, Focus, Mode};
+use crate::app::{App, Focus, Mode, View, EDITOR_GUTTER};
 
 /// Dessine toute l'interface pour une frame.
 pub fn draw(frame: &mut Frame, app: &mut App) {
@@ -31,7 +31,14 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         .constraints([Constraint::Percentage(28), Constraint::Min(24)])
         .split(chunks[1]);
     draw_tree(frame, body[0], app);
-    draw_editor(frame, body[1], app);
+    match app.view {
+        View::Code => draw_editor(frame, body[1], app),
+        View::Git => {
+            // En vue git, aucun clic éditeur : on neutralise la zone.
+            app.layout.editor = Rect::default();
+            draw_git(frame, body[1], app);
+        }
+    }
 
     draw_output(frame, chunks[2], app);
     draw_command_bar(frame, chunks[3], app);
@@ -82,7 +89,7 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
     );
 }
 
-fn draw_tree(frame: &mut Frame, area: Rect, app: &App) {
+fn draw_tree(frame: &mut Frame, area: Rect, app: &mut App) {
     let rows = app.visible();
     let focused = app.focus == Focus::Tree && app.mode == Mode::Normal;
     let inner = area.height.saturating_sub(2) as usize;
@@ -91,6 +98,10 @@ fn draw_tree(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         0
     };
+
+    // Mémorise la géométrie pour la souris (clic → sélection).
+    app.layout.tree = area;
+    app.layout.tree_offset = offset;
 
     let lines: Vec<Line> = rows
         .iter()
@@ -139,29 +150,14 @@ fn draw_tree(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
-fn draw_editor(frame: &mut Frame, area: Rect, app: &App) {
+fn draw_editor(frame: &mut Frame, area: Rect, app: &mut App) {
     let focused = app.focus == Focus::Editor && app.mode == Mode::Normal;
-    if !focused {
-        frame.render_widget(
-            Paragraph::new(Line::from("Tab pour passer le focus à l'éditeur"))
-                .style(Style::default().fg(Color::DarkGray))
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(" Éditeur ")
-                        .border_style(Style::default().fg(Color::DarkGray)),
-                ),
-            area,
-        );
-        return;
-    }
-
     let editor = &app.editor;
     let row = editor.cursor_row;
     let col = editor.cursor_col;
     let inner_w = area.width.saturating_sub(2) as usize;
     let inner_h = area.height.saturating_sub(2) as usize;
-    let gutter_w = 4usize;
+    let gutter_w = EDITOR_GUTTER;
 
     // Fenêtres de visibilité (défilement vertical et horizontal).
     let y_offset = if inner_h > 0 && row >= inner_h {
@@ -175,6 +171,11 @@ fn draw_editor(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         0
     };
+
+    // Mémorise la géométrie pour la souris (clic → curseur).
+    app.layout.editor = area;
+    app.layout.editor_y_offset = y_offset;
+    app.layout.editor_x_offset = x_offset;
 
     let border = if focused {
         Style::default().fg(Color::Cyan)
@@ -193,6 +194,110 @@ fn draw_editor(frame: &mut Frame, area: Rect, app: &App) {
     };
 
     frame.render_widget(Paragraph::new(contents).block(block), area);
+}
+
+/// Vue « git » : rapport (branche, modifications, derniers commits) affiché à la
+/// place du code.
+fn draw_git(frame: &mut Frame, area: Rect, app: &App) {
+    let git = &app.git;
+    let title = format!(" Git — {} ", git.branch);
+    let mut lines: Vec<Line> = Vec::new();
+
+    if let Some(error) = &git.error {
+        lines.push(Line::from(Span::styled(
+            format!("  ⚠ {error}"),
+            Style::default().fg(Color::Red),
+        )));
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  (hors dépôt git ou git indisponible — :code pour revenir)",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        lines.push(Line::from(vec![
+            Span::styled("  branche  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                git.branch.clone(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+
+        lines.push(Line::from(""));
+        let changes = git.status.len();
+        lines.push(Line::from(Span::styled(
+            format!("  Modifications ({changes})"),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )));
+        if changes == 0 {
+            lines.push(Line::from(Span::styled(
+                "    (arbre de travail propre)",
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else {
+            for entry in &git.status {
+                lines.push(Line::from(vec![
+                    Span::raw("    "),
+                    Span::styled(status_code(entry), Style::default().fg(status_color(entry))),
+                    Span::raw(format!(" {}", status_path(entry))),
+                ]));
+            }
+        }
+
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!("  Derniers commits ({})", git.log.len()),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )));
+        for commit in &git.log {
+            lines.push(Line::from(vec![
+                Span::raw("    "),
+                Span::styled(commit.clone(), Style::default().fg(Color::Gray)),
+            ]));
+        }
+    }
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .border_style(Style::default().fg(Color::Magenta));
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+/// Deux premiers caractères d'une ligne `git status --short` (le code d'état).
+fn status_code(entry: &str) -> String {
+    entry.chars().take(2).collect()
+}
+
+/// Chemin affiché d'une ligne `git status --short`.
+fn status_path(entry: &str) -> String {
+    entry.get(3..).unwrap_or("").to_string()
+}
+
+/// Couleur associée au code d'état git.
+fn status_color(entry: &str) -> Color {
+    let code = status_code(entry);
+    if code.starts_with('?') {
+        Color::DarkGray
+    } else if code.contains('D') {
+        Color::Red
+    } else if code.contains('M') || code.contains('R') {
+        Color::Yellow
+    } else if code.contains('A') {
+        Color::Green
+    } else {
+        Color::Gray
+    }
 }
 
 fn build_editor_lines(
@@ -297,15 +402,21 @@ fn draw_hint(frame: &mut Frame, area: Rect, app: &App) {
                 format!("suggestions: {}", names.join("  "))
             }
         }
-        _ => match app.focus {
-            Focus::Tree => {
-                "j/k: naviguer · l/Entrée: ouvrir · h: replier · Tab: éditeur · : : commande · Ctrl-P: palette · q: quitter"
+        _ => match app.view {
+            View::Git => {
+                "vue git · :code: revenir au code · Ctrl-G: basculer · : : commande · q (arbre): quitter"
                     .to_string()
             }
-            Focus::Editor => {
-                "flèches: déplacer · Entrée: ligne · BS/Suppr: effacer · Ctrl-S: sauver · Tab: arbre · : : commande"
-                    .to_string()
-            }
+            View::Code => match app.focus {
+                Focus::Tree => {
+                    "j/k: naviguer · clic: ouvrir · l/Entrée: ouvrir · h: replier · Tab: éditeur · : : commande · :git vue git"
+                        .to_string()
+                }
+                Focus::Editor => {
+                    "clic: placer le curseur · flèches: déplacer · Ctrl-S: sauver · Tab: arbre · : : commande · :git"
+                        .to_string()
+                }
+            },
         },
     };
     frame.render_widget(
@@ -389,8 +500,13 @@ mod tests {
         ];
         let exec: Executor = Box::new(|_c, _cmd, _args| Ok(Output::empty()));
         let mut app = App::new(ctx, specs, exec, None);
+        render_app(&mut app, width, height)
+    }
+
+    /// Rend une app existante dans un backend de test et renvoie l'écran texte.
+    fn render_app(app: &mut App, width: u16, height: u16) -> String {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        terminal.draw(|f| draw(f, app)).unwrap();
         let buffer = terminal.backend().buffer();
         let mut out = String::new();
         for y in 0..height {
@@ -447,5 +563,42 @@ mod tests {
             screen.contains("tree"),
             "commande absente de la palette:\n{screen}"
         );
+    }
+
+    #[test]
+    fn renders_git_view_instead_of_editor() {
+        let ctx = Context::with_root(".");
+        let specs = vec![CommandSpec::new("tree", "arborescence", "tree")];
+        let exec: Executor = Box::new(|_c, _cmd, _args| Ok(Output::empty()));
+        let mut app = App::new(ctx, specs, exec, None);
+        app.view = View::Git;
+        app.git.branch = "main".to_string();
+        app.git.status = vec![" M src/main.rs".to_string()];
+        app.git.log = vec!["abc1234 init".to_string()];
+        let screen = render_app(&mut app, 100, 30);
+        assert!(
+            screen.contains("Git — main"),
+            "en-tête git manquant:\n{screen}"
+        );
+        assert!(
+            screen.contains("main.rs"),
+            "fichier modifié manquant:\n{screen}"
+        );
+        assert!(screen.contains("abc1234"), "commit manquant:\n{screen}");
+        assert!(
+            !screen.contains("Tab pour passer le focus"),
+            "l'éditeur ne doit pas être rendu en vue git"
+        );
+    }
+
+    #[test]
+    fn git_view_disables_editor_clicks() {
+        let ctx = Context::with_root(".");
+        let specs = vec![CommandSpec::new("tree", "arborescence", "tree")];
+        let exec: Executor = Box::new(|_c, _cmd, _args| Ok(Output::empty()));
+        let mut app = App::new(ctx, specs, exec, None);
+        app.view = View::Git;
+        render_app(&mut app, 100, 30);
+        assert_eq!(app.layout.editor, Rect::default());
     }
 }
