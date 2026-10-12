@@ -1,0 +1,27 @@
+.root {
+  margin-bottom: var(--prism-space-8);
+}
+
+.track {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(9rem, 11rem);
+  gap: var(--prism-space-4);
+  margin-top: var(--prism-space-4);
+  overflow: hidden;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--prism-space-2);
+  padding: var(--prism-space-3);
+  background-color: var(--prism-color-surface);
+  border-radius: var(--prism-radius-lg);
+}
+
+.artwork {
+  aspect-ratio: 1 / 1;
+  height: auto !important;
+  border-radius: var(--prism-radius-md);
+}

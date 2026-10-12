@@ -1,0 +1,44 @@
+.root {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.track {
+  display: inline-flex;
+  align-items: center;
+  will-change: transform;
+}
+
+.item {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+/* The duplicate keeps the loop seamless when scrolling. */
+.item[aria-hidden='true'] {
+  display: none;
+}
+
+.overflowing .item {
+  padding-right: var(--prism-space-8);
+}
+
+.overflowing .item[aria-hidden='true'] {
+  display: inline-block;
+}
+
+.overflowing:hover .track,
+.overflowing:focus-within .track {
+  animation: prism-marquee var(--marquee-duration, 12s) linear infinite;
+}
+
+@keyframes prism-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}

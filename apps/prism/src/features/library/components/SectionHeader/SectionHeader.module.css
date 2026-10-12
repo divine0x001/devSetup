@@ -1,0 +1,63 @@
+.root {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--prism-space-4);
+  margin-bottom: var(--prism-space-4);
+}
+
+.heading {
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--prism-font-size-xl);
+  font-weight: var(--prism-font-weight-bold);
+  letter-spacing: var(--prism-letter-spacing-tight);
+  color: var(--prism-color-text);
+}
+
+.subtitle {
+  margin: var(--prism-space-1) 0 0;
+  font-size: var(--prism-font-size-sm);
+  color: var(--prism-color-text-muted);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--prism-space-2);
+  flex: 0 0 auto;
+}
+
+.seeAll {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--prism-space-1);
+  padding: var(--prism-space-1) var(--prism-space-2);
+  font-size: var(--prism-font-size-xs);
+  font-weight: var(--prism-font-weight-semibold);
+  letter-spacing: var(--prism-letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--prism-color-text-muted);
+  background: none;
+  border: none;
+  border-radius: var(--prism-radius-sm);
+  cursor: pointer;
+  transition: color var(--prism-motion-duration-fast) var(--prism-motion-ease-standard);
+}
+
+.seeAll:hover {
+  color: var(--prism-color-text);
+}
+
+.seeAll svg {
+  width: 1em;
+  height: 1em;
+}
+
+.seeAll:focus-visible {
+  outline: 2px solid var(--prism-color-focus-ring);
+  outline-offset: 2px;
+}

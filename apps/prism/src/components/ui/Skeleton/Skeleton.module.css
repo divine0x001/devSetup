@@ -1,0 +1,28 @@
+.root {
+  display: block;
+  position: relative;
+  overflow: hidden;
+  background-color: var(--prism-color-surface-active);
+  border-radius: var(--prism-radius-sm);
+}
+
+.root::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--prism-color-surface-hover) 50%,
+    transparent 100%
+  );
+  animation: prism-skeleton-shimmer calc(var(--prism-motion-duration-slower) * 2)
+    var(--prism-motion-ease-standard) infinite;
+}
+
+@keyframes prism-skeleton-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}

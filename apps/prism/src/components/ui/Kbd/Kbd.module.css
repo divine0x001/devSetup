@@ -1,0 +1,19 @@
+.root {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--prism-space-6);
+  height: var(--prism-space-6);
+  padding-inline: var(--prism-space-2);
+  background-color: var(--prism-color-surface);
+  color: var(--prism-color-text-muted);
+  border: 1px solid var(--prism-color-border);
+  border-bottom-width: 2px;
+  border-radius: var(--prism-radius-sm);
+  box-shadow: var(--prism-shadow-xs);
+  font-family: var(--prism-font-mono);
+  font-size: var(--prism-font-size-xs);
+  font-weight: var(--prism-font-weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+}

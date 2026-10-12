@@ -1,0 +1,181 @@
+/**
+ * Prism — Design tokens (FROZEN names).
+ *
+ * Every customizable value is exposed as a `--prism-*` custom property.
+ * These `:root` values are the DEFAULT theme (dark, "soft" radius,
+ * "comfortable" density). At runtime `ThemeProvider` overrides them from the
+ * active theme (see `src/theme/types.ts#themeToCssVariables`).
+ *
+ * Naming convention: --prism-<group>-<name>
+ *   groups: color | radius | space | font | line-height | letter-spacing |
+ *           shadow | blur | motion
+ *
+ * DO NOT rename or remove a token — other workers consume them.
+ */
+
+:root {
+  /* ----- Colors --------------------------------------------------------- */
+  --prism-color-bg: #0a0a0f;
+  --prism-color-bg-elevated: #12121a;
+  --prism-color-surface: #17171f;
+  --prism-color-surface-hover: #1f1f2b;
+  --prism-color-surface-active: #262634;
+  --prism-color-surface-sunken: #06060a;
+  --prism-color-overlay: rgba(4, 4, 8, 0.72);
+  --prism-color-accent: #1ed760;
+  --prism-color-accent-hover: #3be477;
+  --prism-color-accent-active: #17b34c;
+  --prism-color-accent-contrast: #04120a;
+  --prism-color-text: #f5f5f7;
+  --prism-color-text-muted: #a8a8b6;
+  --prism-color-text-subtle: #6f6f80;
+  --prism-color-border: #26262f;
+  --prism-color-border-strong: #3a3a48;
+  --prism-color-success: #1ed760;
+  --prism-color-warning: #f2c94c;
+  --prism-color-danger: #ff5c5c;
+  --prism-color-focus-ring: #8b7bff;
+
+  /* ----- Radii ---------------------------------------------------------- */
+  --prism-radius-none: 0px;
+  --prism-radius-xs: 2px;
+  --prism-radius-sm: 4px;
+  --prism-radius-md: 8px;
+  --prism-radius-lg: 12px;
+  --prism-radius-xl: 18px;
+  --prism-radius-2xl: 28px;
+  --prism-radius-full: 9999px;
+
+  /* ----- Spacing (4px base) -------------------------------------------- */
+  --prism-space-0: 0rem;
+  --prism-space-1: 0.25rem;
+  --prism-space-2: 0.5rem;
+  --prism-space-3: 0.75rem;
+  --prism-space-4: 1rem;
+  --prism-space-5: 1.25rem;
+  --prism-space-6: 1.5rem;
+  --prism-space-7: 1.75rem;
+  --prism-space-8: 2rem;
+  --prism-space-9: 2.5rem;
+  --prism-space-10: 3rem;
+  --prism-space-11: 4rem;
+  --prism-space-12: 6rem;
+
+  /* ----- Typography ----------------------------------------------------- */
+  --prism-font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto,
+    Helvetica, Arial, sans-serif;
+  --prism-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo,
+    Consolas, monospace;
+  --prism-font-size-xs: 0.75rem;
+  --prism-font-size-sm: 0.875rem;
+  --prism-font-size-md: 1rem;
+  --prism-font-size-lg: 1.125rem;
+  --prism-font-size-xl: 1.375rem;
+  --prism-font-size-2xl: 1.75rem;
+  --prism-font-size-3xl: 2.5rem;
+  --prism-font-weight-regular: 400;
+  --prism-font-weight-medium: 500;
+  --prism-font-weight-semibold: 600;
+  --prism-font-weight-bold: 700;
+  --prism-line-height-tight: 1.2;
+  --prism-line-height-normal: 1.5;
+  --prism-line-height-relaxed: 1.7;
+  --prism-letter-spacing-tight: -0.02em;
+  --prism-letter-spacing-normal: 0em;
+  --prism-letter-spacing-wide: 0.04em;
+
+  /* ----- Elevation shadows --------------------------------------------- */
+  --prism-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --prism-shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.45);
+  --prism-shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --prism-shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55);
+  --prism-shadow-xl: 0 28px 64px rgba(0, 0, 0, 0.6);
+
+  /* ----- Backdrop blur -------------------------------------------------- */
+  --prism-blur-sm: 6px;
+  --prism-blur-md: 12px;
+  --prism-blur-lg: 20px;
+  --prism-blur-xl: 40px;
+
+  /* ----- Motion --------------------------------------------------------- */
+  --prism-motion-duration-instant: 80ms;
+  --prism-motion-duration-fast: 140ms;
+  --prism-motion-duration-base: 220ms;
+  --prism-motion-duration-slow: 340ms;
+  --prism-motion-duration-slower: 520ms;
+  --prism-motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --prism-motion-ease-emphasized: cubic-bezier(0.3, 0, 0, 1);
+  --prism-motion-ease-decelerate: cubic-bezier(0, 0, 0, 1);
+  --prism-motion-ease-accelerate: cubic-bezier(0.3, 0, 1, 1);
+
+  /* ----- Behavioral meta (set by ThemeProvider) ------------------------ */
+  --prism-layout: sidebar;
+  --prism-density: comfortable;
+  --prism-radius-scale: soft;
+  --prism-color-mode: dark;
+
+  /* ----- Layout metrics (shell dimensions) ----------------------------- */
+  --prism-sidebar-width: 15rem;
+  --prism-sidebar-width-collapsed: 4.5rem;
+  --prism-topbar-height: 4rem;
+  --prism-player-height: 5.5rem;
+  --prism-content-max-width: 90rem;
+  --prism-z-player: 100;
+  --prism-z-overlay: 200;
+  --prism-z-modal: 300;
+  --prism-z-toast: 400;
+}
+
+/* ---------------------------------------------------------------------------
+ * Radius scale — remaps the radius ramp when `[data-radius]` changes.
+ * ------------------------------------------------------------------------- */
+:root[data-radius='sharp'] {
+  --prism-radius-sm: 2px;
+  --prism-radius-md: 4px;
+  --prism-radius-lg: 6px;
+  --prism-radius-xl: 8px;
+  --prism-radius-2xl: 10px;
+}
+:root[data-radius='round'] {
+  --prism-radius-sm: 8px;
+  --prism-radius-md: 12px;
+  --prism-radius-lg: 18px;
+  --prism-radius-xl: 24px;
+  --prism-radius-2xl: 32px;
+}
+:root[data-radius='pill'] {
+  --prism-radius-sm: 9999px;
+  --prism-radius-md: 9999px;
+  --prism-radius-lg: 9999px;
+  --prism-radius-xl: 9999px;
+  --prism-radius-2xl: 9999px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Density — controls base control sizing & gap.
+ * ------------------------------------------------------------------------- */
+:root[data-density='cozy'] {
+  --prism-control-height: 2rem;
+  --prism-density-gap: var(--prism-space-3);
+}
+:root[data-density='compact'] {
+  --prism-control-height: 1.75rem;
+  --prism-density-gap: var(--prism-space-2);
+}
+:root {
+  --prism-control-height: 2.25rem;
+  --prism-density-gap: var(--prism-space-4);
+}
+
+/* ---------------------------------------------------------------------------
+ * Reduced motion — kill transitions globally.
+ * ------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --prism-motion-duration-instant: 0ms;
+    --prism-motion-duration-fast: 0ms;
+    --prism-motion-duration-base: 0ms;
+    --prism-motion-duration-slow: 0ms;
+    --prism-motion-duration-slower: 0ms;
+  }
+}

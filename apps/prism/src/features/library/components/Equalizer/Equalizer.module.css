@@ -1,0 +1,48 @@
+.root {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  width: 1em;
+  height: 1em;
+  color: var(--prism-color-accent);
+}
+
+.bar {
+  flex: 1 1 0;
+  min-width: 2px;
+  height: 30%;
+  background-color: currentColor;
+  border-radius: var(--prism-radius-xs);
+  transform-origin: bottom;
+}
+
+.playing .bar {
+  animation: prism-equalize 900ms var(--prism-motion-ease-standard) infinite;
+}
+
+.playing .bar:nth-child(2) {
+  animation-duration: 700ms;
+  animation-delay: 120ms;
+}
+
+.playing .bar:nth-child(3) {
+  animation-duration: 1100ms;
+  animation-delay: 240ms;
+}
+
+@keyframes prism-equalize {
+  0%,
+  100% {
+    height: 30%;
+  }
+  50% {
+    height: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .playing .bar {
+    animation: none;
+    height: 70%;
+  }
+}

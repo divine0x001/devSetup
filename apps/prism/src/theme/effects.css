@@ -1,0 +1,130 @@
+/**
+ * Prism — Ambient effects (W3).
+ *
+ * Consumes the `--prism-effect-*` custom properties written by `ThemeProvider`
+ * and the `data-bg` / `data-glow` attributes it sets on <html>. Everything here
+ * is expressed with `--prism-*` tokens; no hard-coded design values.
+ *
+ * Imported from `ThemeProvider` so it is always loaded with the app.
+ */
+
+/* Opaque canvas: keep the base color even when `--prism-color-bg` is made
+ * translucent to reveal the ambient backdrop through the shell. */
+:root {
+  background-color: var(--prism-color-bg-solid, var(--prism-color-bg));
+}
+
+:root body {
+  background-color: var(--prism-color-bg-solid, var(--prism-color-bg));
+}
+
+:root[data-color-resolved='light'] {
+  color-scheme: light;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Ambient backdrop                                                            */
+/* -------------------------------------------------------------------------- */
+
+:root[data-bg='gradient'] body,
+:root[data-bg='mesh'] body {
+  background-attachment: fixed;
+}
+
+:root[data-bg='gradient'] body {
+  background-image:
+    radial-gradient(
+      120% 85% at 12% -5%,
+      color-mix(
+          in srgb,
+          var(--prism-color-accent) calc(var(--prism-effect-gradient, 55) * 0.9%),
+          transparent
+        )
+        0%,
+      transparent 58%
+    ),
+    radial-gradient(
+      95% 75% at 105% 108%,
+      color-mix(
+          in srgb,
+          var(--prism-color-accent-active) calc(var(--prism-effect-gradient, 55) * 0.75%),
+          transparent
+        )
+        0%,
+      transparent 55%
+    );
+}
+
+:root[data-bg='mesh'] body {
+  background-image:
+    radial-gradient(
+      60% 55% at 10% 8%,
+      color-mix(
+          in srgb,
+          var(--prism-color-accent) calc(var(--prism-effect-gradient, 55) * 0.8%),
+          transparent
+        ),
+      transparent 72%
+    ),
+    radial-gradient(
+      55% 60% at 90% 12%,
+      color-mix(
+          in srgb,
+          var(--prism-color-success) calc(var(--prism-effect-gradient, 55) * 0.5%),
+          transparent
+        ),
+      transparent 70%
+    ),
+    radial-gradient(
+      65% 65% at 82% 92%,
+      color-mix(
+          in srgb,
+          var(--prism-color-focus-ring) calc(var(--prism-effect-gradient, 55) * 0.55%),
+          transparent
+        ),
+      transparent 72%
+    ),
+    radial-gradient(
+      60% 60% at 12% 92%,
+      color-mix(
+          in srgb,
+          var(--prism-color-warning) calc(var(--prism-effect-gradient, 55) * 0.35%),
+          transparent
+        ),
+      transparent 72%
+    );
+}
+
+/* Film grain ---------------------------------------------------------------- */
+:root[data-bg='noise'] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: var(--prism-effect-noise-opacity, 0.12);
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 140px 140px;
+}
+
+/* Accent bloom -------------------------------------------------------------- */
+:root[data-glow='true'] body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(
+    130% 65% at 50% 125%,
+    color-mix(in srgb, var(--prism-color-accent) 20%, transparent),
+    transparent 72%
+  );
+}
+
+/* Reduced motion: never animate the ambient layers. */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-bg] body {
+    background-attachment: scroll;
+  }
+}

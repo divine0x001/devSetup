@@ -1,0 +1,37 @@
+.root {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: currentColor;
+}
+
+.sm {
+  width: var(--prism-space-3);
+  height: var(--prism-space-3);
+}
+
+.md {
+  width: var(--prism-space-5);
+  height: var(--prism-space-5);
+}
+
+.lg {
+  width: var(--prism-space-8);
+  height: var(--prism-space-8);
+}
+
+.ring {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--prism-radius-full);
+  border: 2px solid var(--prism-color-border-strong);
+  border-top-color: var(--prism-color-accent);
+  animation: prism-spinner-rotate 720ms linear infinite;
+}
+
+@keyframes prism-spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}

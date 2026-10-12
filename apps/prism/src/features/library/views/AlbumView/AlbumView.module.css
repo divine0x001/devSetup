@@ -1,0 +1,25 @@
+.root {
+  padding: var(--prism-space-6) var(--prism-space-6) var(--prism-space-10);
+}
+
+.heroSkeleton {
+  height: 16rem;
+  margin-bottom: var(--prism-space-6);
+  background-color: var(--prism-color-surface);
+  border-radius: var(--prism-radius-xl);
+}
+
+.artist {
+  font-weight: var(--prism-font-weight-semibold);
+  color: var(--prism-color-text);
+}
+
+.saved {
+  color: var(--prism-color-accent);
+}
+
+@media (max-width: 40rem) {
+  .root {
+    padding: var(--prism-space-4) var(--prism-space-4) var(--prism-space-8);
+  }
+}

@@ -1,0 +1,30 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--prism-space-1);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1.5rem 2.5rem minmax(0, 1.4fr) minmax(0, 1fr) 2.5rem;
+  align-items: center;
+  gap: var(--prism-space-3);
+  padding: var(--prism-space-2) var(--prism-space-3);
+}
+
+.title {
+  display: flex;
+  flex-direction: column;
+  gap: var(--prism-space-1);
+  min-width: 0;
+}
+
+@media (max-width: 48rem) {
+  .row {
+    grid-template-columns: 1.5rem 2.5rem minmax(0, 1fr) 2.5rem;
+  }
+
+  .row > :nth-child(4) {
+    display: none;
+  }
+}

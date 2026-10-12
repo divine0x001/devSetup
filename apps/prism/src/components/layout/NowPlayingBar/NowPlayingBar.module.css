@@ -1,0 +1,163 @@
+.root {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--prism-space-4);
+  height: var(--prism-player-height);
+  padding-inline: var(--prism-space-4);
+  background-color: var(--prism-color-bg-elevated);
+  border-top: 1px solid var(--prism-color-border);
+}
+
+/* Track info --------------------------------------------------------------- */
+.trackInfo {
+  display: flex;
+  align-items: center;
+  gap: var(--prism-space-3);
+  min-width: 0;
+}
+
+.coverButton {
+  display: inline-flex;
+  flex: 0 0 auto;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--prism-radius-md);
+  cursor: pointer;
+}
+
+.cover {
+  border: none;
+  border-radius: var(--prism-radius-md);
+  box-shadow: var(--prism-shadow-sm);
+}
+
+.meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.trackName {
+  font-size: var(--prism-font-size-sm);
+  font-weight: var(--prism-font-weight-medium);
+  color: var(--prism-color-text);
+}
+
+.artists {
+  display: block;
+  font-size: var(--prism-font-size-xs);
+  color: var(--prism-color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.artistLink:hover {
+  color: var(--prism-color-text);
+  text-decoration: underline;
+}
+
+.like {
+  flex: 0 0 auto;
+}
+
+.likeActive {
+  color: var(--prism-color-accent);
+}
+
+/* Controls ----------------------------------------------------------------- */
+.controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--prism-space-2);
+  min-width: 0;
+}
+
+.buttons {
+  display: flex;
+  align-items: center;
+  gap: var(--prism-space-2);
+}
+
+.buttons .activeControl,
+.right .activeControl {
+  color: var(--prism-color-accent);
+}
+
+.buttons .playButton {
+  transition:
+    transform var(--prism-motion-duration-fast) var(--prism-motion-ease-standard),
+    background-color var(--prism-motion-duration-fast) var(--prism-motion-ease-standard);
+}
+
+.buttons .playButton:hover:not(:disabled) {
+  transform: scale(1.06);
+}
+
+.buttons .playButton:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.progress {
+  display: flex;
+  align-items: center;
+  gap: var(--prism-space-2);
+  width: 100%;
+  max-width: 40rem;
+}
+
+.time {
+  flex: 0 0 auto;
+  min-width: var(--prism-space-9);
+  font-size: var(--prism-font-size-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--prism-color-text-subtle);
+  text-align: center;
+}
+
+.progressSlider {
+  flex: 1 1 auto;
+}
+
+/* Right cluster ------------------------------------------------------------ */
+.right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--prism-space-2);
+  min-width: 0;
+}
+
+.volume {
+  display: flex;
+  align-items: center;
+  gap: var(--prism-space-1);
+  width: calc(var(--prism-space-11) * 2);
+  max-width: 40%;
+}
+
+.volumeSlider {
+  flex: 1 1 auto;
+}
+
+@media (max-width: 64rem) {
+  .volume {
+    display: none;
+  }
+}
+
+@media (max-width: 48rem) {
+  .right,
+  .trackInfo .like {
+    display: none;
+  }
+
+  .progress {
+    max-width: none;
+  }
+}

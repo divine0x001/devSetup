@@ -1,0 +1,44 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--prism-space-3);
+  padding: var(--prism-space-10) var(--prism-space-6);
+  text-align: center;
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--prism-space-11);
+  height: var(--prism-space-11);
+  color: var(--prism-color-text-subtle);
+  background-color: var(--prism-color-surface);
+  border-radius: var(--prism-radius-full);
+}
+
+.icon svg {
+  width: 50%;
+  height: 50%;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--prism-font-size-lg);
+  font-weight: var(--prism-font-weight-semibold);
+  color: var(--prism-color-text);
+}
+
+.description {
+  max-width: 32rem;
+  margin: 0;
+  font-size: var(--prism-font-size-sm);
+  line-height: var(--prism-line-height-normal);
+  color: var(--prism-color-text-muted);
+}
+
+.action {
+  margin-top: var(--prism-space-2);
+}

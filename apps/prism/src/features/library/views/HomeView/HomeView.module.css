@@ -1,0 +1,196 @@
+.root {
+  padding: var(--prism-space-6) var(--prism-space-6) var(--prism-space-10);
+}
+
+.greeting {
+  margin: 0 0 var(--prism-space-6);
+  font-size: var(--prism-font-size-2xl);
+  font-weight: var(--prism-font-weight-bold);
+  letter-spacing: var(--prism-letter-spacing-tight);
+  color: var(--prism-color-text);
+}
+
+/* Resume hero -------------------------------------------------------------- */
+.resume {
+  display: flex;
+  align-items: center;
+  gap: var(--prism-space-4);
+  padding: var(--prism-space-4);
+  margin-bottom: var(--prism-space-8);
+  background: linear-gradient(
+    120deg,
+    var(--prism-color-surface),
+    var(--prism-color-bg-elevated)
+  );
+  border: 1px solid var(--prism-color-border);
+  border-radius: var(--prism-radius-xl);
+}
+
+.resumeArtwork {
+  flex: 0 0 auto;
+  width: var(--prism-space-11);
+  height: var(--prism-space-11);
+  overflow: hidden;
+  border-radius: var(--prism-radius-md);
+  box-shadow: var(--prism-shadow-md);
+}
+
+.resumeArtwork img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.resumePlaceholder {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    135deg,
+    var(--prism-color-surface-active),
+    var(--prism-color-surface-sunken)
+  );
+}
+
+.resumeMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.resumeEyebrow {
+  font-size: var(--prism-font-size-xs);
+  font-weight: var(--prism-font-weight-semibold);
+  letter-spacing: var(--prism-letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--prism-color-accent);
+}
+
+.resumeTitle {
+  font-size: var(--prism-font-size-lg);
+  font-weight: var(--prism-font-weight-semibold);
+  color: var(--prism-color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resumeArtists {
+  font-size: var(--prism-font-size-sm);
+  color: var(--prism-color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resumePlay {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--prism-space-10);
+  height: var(--prism-space-10);
+  color: var(--prism-color-accent-contrast);
+  background-color: var(--prism-color-accent);
+  border: none;
+  border-radius: var(--prism-radius-full);
+  box-shadow: var(--prism-shadow-md);
+  cursor: pointer;
+  transition:
+    transform var(--prism-motion-duration-fast) var(--prism-motion-ease-standard),
+    background-color var(--prism-motion-duration-fast) var(--prism-motion-ease-standard);
+}
+
+.resumePlay svg {
+  width: 45%;
+  height: 45%;
+}
+
+.resumePlay:hover {
+  background-color: var(--prism-color-accent-hover);
+  transform: scale(1.05);
+}
+
+.resumePlay:focus-visible {
+  outline: 2px solid var(--prism-color-focus-ring);
+  outline-offset: 2px;
+}
+
+/* Quick picks -------------------------------------------------------------- */
+.quick {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: var(--prism-space-3);
+  margin-bottom: var(--prism-space-8);
+}
+
+.quickCard {
+  display: flex;
+  align-items: center;
+  gap: var(--prism-space-3);
+  padding: var(--prism-space-2);
+  padding-right: var(--prism-space-4);
+  background-color: var(--prism-color-surface);
+  border: 1px solid transparent;
+  border-radius: var(--prism-radius-md);
+  transition:
+    background-color var(--prism-motion-duration-fast) var(--prism-motion-ease-standard),
+    border-color var(--prism-motion-duration-fast) var(--prism-motion-ease-standard);
+}
+
+.quickCard:hover {
+  background-color: var(--prism-color-surface-hover);
+  border-color: var(--prism-color-border);
+}
+
+.quickCard:focus-visible {
+  outline: 2px solid var(--prism-color-focus-ring);
+  outline-offset: 2px;
+}
+
+.quickArtwork {
+  flex: 0 0 auto;
+  width: var(--prism-space-9);
+  height: var(--prism-space-9);
+  overflow: hidden;
+  border-radius: var(--prism-radius-sm);
+}
+
+.quickArtwork img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.quickPlaceholder {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    135deg,
+    var(--prism-color-surface-active),
+    var(--prism-color-surface-sunken)
+  );
+}
+
+.quickName {
+  min-width: 0;
+  font-size: var(--prism-font-size-sm);
+  font-weight: var(--prism-font-weight-medium);
+  color: var(--prism-color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 40rem) {
+  .root {
+    padding: var(--prism-space-4) var(--prism-space-4) var(--prism-space-8);
+  }
+
+  .quick {
+    grid-template-columns: 1fr;
+  }
+}

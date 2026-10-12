@@ -1,0 +1,27 @@
+.root {
+  margin-bottom: var(--prism-space-8);
+}
+
+.track {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(9rem, 11rem);
+  gap: var(--prism-space-4);
+  overflow-x: auto;
+  padding-bottom: var(--prism-space-2);
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+}
+
+.track > * {
+  scroll-snap-align: start;
+}
+
+.track::-webkit-scrollbar {
+  height: 8px;
+}
+
+.track::-webkit-scrollbar-thumb {
+  background-color: var(--prism-color-border-strong);
+  border-radius: var(--prism-radius-full);
+}

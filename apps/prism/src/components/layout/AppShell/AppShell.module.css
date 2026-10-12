@@ -1,0 +1,107 @@
+.root {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'sidebar topbar'
+    'sidebar main'
+    'player player';
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  background-color: var(--prism-color-bg);
+  color: var(--prism-color-text);
+}
+
+.sidebarArea {
+  grid-area: sidebar;
+  min-width: 0;
+  min-height: 0;
+}
+
+.topbarArea {
+  grid-area: topbar;
+  min-width: 0;
+  z-index: 1;
+}
+
+.mainArea {
+  grid-area: main;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.playerArea {
+  grid-area: player;
+  min-width: 0;
+}
+
+/* Layout variants ---------------------------------------------------------- */
+.root[data-layout='topnav'] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    'topbar'
+    'main'
+    'player';
+}
+
+.root[data-layout='topnav'] .sidebarArea {
+  display: none;
+}
+
+/* Mobile ------------------------------------------------------------------- */
+.root[data-mobile='true'] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    'topbar'
+    'main'
+    'player';
+}
+
+.root[data-mobile='true'] .sidebarArea {
+  display: none;
+}
+
+/* Drawer ------------------------------------------------------------------- */
+.drawerScrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--prism-z-overlay);
+  background-color: var(--prism-color-overlay);
+  backdrop-filter: blur(var(--prism-blur-sm));
+  animation: prism-drawer-scrim-in var(--prism-motion-duration-fast)
+    var(--prism-motion-ease-standard);
+}
+
+.drawer {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  display: flex;
+  width: min(80vw, var(--prism-sidebar-width));
+  box-shadow: var(--prism-shadow-xl);
+  animation: prism-drawer-in var(--prism-motion-duration-base) var(--prism-motion-ease-decelerate);
+}
+
+.drawer > * {
+  width: 100%;
+}
+
+@keyframes prism-drawer-scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes prism-drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}

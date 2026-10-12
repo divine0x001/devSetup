@@ -1,0 +1,283 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--prism-z-modal);
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(
+    180deg,
+    var(--np-from, var(--prism-color-bg-elevated)) 0%,
+    var(--np-to, var(--prism-color-bg)) 100%
+  );
+  outline: none;
+}
+
+.backdrop {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at 50% 0%,
+    rgba(var(--np-rgb, 30, 215, 96), 0.28),
+    transparent 62%
+  );
+  pointer-events: none;
+}
+
+/* Header ------------------------------------------------------------------- */
+.header {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--prism-space-3);
+  padding: var(--prism-space-4) var(--prism-space-5);
+}
+
+.headerTitle {
+  font-size: var(--prism-font-size-xs);
+  font-weight: var(--prism-font-weight-semibold);
+  letter-spacing: var(--prism-letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--prism-color-text-muted);
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: var(--prism-space-2);
+}
+
+.activeControl {
+  color: var(--prism-color-accent);
+}
+
+/* Body --------------------------------------------------------------------- */
+.body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--prism-space-5);
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--prism-space-4) var(--prism-space-6) var(--prism-space-8);
+  overflow-y: auto;
+}
+
+/* Artwork ------------------------------------------------------------------ */
+.artworkWrap {
+  flex: 0 0 auto;
+  width: clamp(11rem, 38vh, 22rem);
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  border-radius: var(--prism-radius-xl);
+  box-shadow: var(--prism-shadow-xl);
+}
+
+.artwork {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.artworkPlaceholder {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    135deg,
+    var(--prism-color-surface-active),
+    var(--prism-color-surface-sunken)
+  );
+}
+
+/* Info --------------------------------------------------------------------- */
+.info {
+  display: flex;
+  align-items: center;
+  gap: var(--prism-space-4);
+  width: 100%;
+  max-width: 40rem;
+}
+
+.infoText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--prism-space-1);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.trackName {
+  margin: 0;
+  font-size: var(--prism-font-size-2xl);
+  font-weight: var(--prism-font-weight-bold);
+  letter-spacing: var(--prism-letter-spacing-tight);
+  color: var(--prism-color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artists {
+  font-size: var(--prism-font-size-md);
+  color: var(--prism-color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artistLink:hover {
+  color: var(--prism-color-text);
+  text-decoration: underline;
+}
+
+.likeActive {
+  color: var(--prism-color-accent);
+}
+
+/* Controls ----------------------------------------------------------------- */
+.controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--prism-space-4);
+  width: 100%;
+  max-width: 40rem;
+}
+
+.buttons {
+  display: flex;
+  align-items: center;
+  gap: var(--prism-space-4);
+}
+
+.controls .playButton {
+  width: var(--prism-space-11);
+  height: var(--prism-space-11);
+}
+
+.controls .playButton svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.progress {
+  display: flex;
+  align-items: center;
+  gap: var(--prism-space-3);
+  width: 100%;
+}
+
+.time {
+  flex: 0 0 auto;
+  min-width: var(--prism-space-9);
+  font-size: var(--prism-font-size-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--prism-color-text-subtle);
+  text-align: center;
+}
+
+.slider {
+  flex: 1 1 auto;
+}
+
+.volume {
+  display: flex;
+  align-items: center;
+  gap: var(--prism-space-2);
+  width: 60%;
+  max-width: 20rem;
+}
+
+/* Visualizer --------------------------------------------------------------- */
+.visualizerWrap {
+  width: 100%;
+  max-width: 40rem;
+  height: var(--prism-space-10);
+  opacity: 0.85;
+}
+
+/* Empty -------------------------------------------------------------------- */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--prism-space-2);
+  text-align: center;
+}
+
+.emptyTitle {
+  margin: 0;
+  font-size: var(--prism-font-size-xl);
+  font-weight: var(--prism-font-weight-semibold);
+  color: var(--prism-color-text);
+}
+
+.emptyText {
+  margin: 0;
+  font-size: var(--prism-font-size-sm);
+  color: var(--prism-color-text-muted);
+}
+
+/* Side panel --------------------------------------------------------------- */
+.panel {
+  flex: 0 0 auto;
+  width: min(24rem, 90vw);
+  padding: var(--prism-space-5);
+  background-color: var(--prism-color-bg-elevated);
+  border-left: 1px solid var(--prism-color-border);
+  overflow-y: auto;
+}
+
+.lyrics {
+  display: flex;
+  flex-direction: column;
+  gap: var(--prism-space-3);
+}
+
+.lyricsTitle {
+  margin: 0;
+  font-size: var(--prism-font-size-lg);
+  font-weight: var(--prism-font-weight-bold);
+  color: var(--prism-color-text);
+}
+
+.lyricsText {
+  margin: 0;
+  font-size: var(--prism-font-size-sm);
+  line-height: var(--prism-line-height-relaxed);
+  color: var(--prism-color-text-muted);
+}
+
+@media (max-width: 56rem) {
+  .panel {
+    position: absolute;
+    inset: 0 0 0 auto;
+    width: min(24rem, 100%);
+    box-shadow: var(--prism-shadow-xl);
+  }
+}
+
+@media (max-width: 40rem) {
+  .main {
+    padding: var(--prism-space-4);
+  }
+
+  .trackName {
+    font-size: var(--prism-font-size-xl);
+  }
+
+  .volume {
+    width: 100%;
+  }
+}

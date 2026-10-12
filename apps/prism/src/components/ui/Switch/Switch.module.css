@@ -1,0 +1,62 @@
+.root {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--prism-space-2);
+  cursor: pointer;
+}
+
+.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.track {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  width: var(--prism-space-9);
+  height: var(--prism-space-5);
+  padding: var(--prism-space-1);
+  border-radius: var(--prism-radius-full);
+  background-color: var(--prism-color-surface-active);
+  transition: background-color var(--prism-motion-duration-fast) var(--prism-motion-ease-standard);
+}
+
+.thumb {
+  width: var(--prism-space-4);
+  height: var(--prism-space-4);
+  border-radius: var(--prism-radius-full);
+  background-color: var(--prism-color-text);
+  box-shadow: var(--prism-shadow-xs);
+  transition:
+    transform var(--prism-motion-duration-base) var(--prism-motion-ease-emphasized),
+    background-color var(--prism-motion-duration-fast) var(--prism-motion-ease-standard);
+}
+
+.input:checked + .track {
+  background-color: var(--prism-color-accent);
+}
+
+.input:checked + .track .thumb {
+  transform: translateX(var(--prism-space-4));
+  background-color: var(--prism-color-accent-contrast);
+}
+
+.input:focus-visible + .track {
+  outline: 2px solid var(--prism-color-focus-ring);
+  outline-offset: 2px;
+}
+
+.label {
+  font-size: var(--prism-font-size-sm);
+  color: var(--prism-color-text-muted);
+}

@@ -1,6 +1,21 @@
-/target
+# Rust
+target/
 **/*.rs.bk
+
+# Swift
 .build/
 .swiftpm/
 DerivedData/
+build/
 
+# Node
+node_modules/
+dist/
+
+# macOS
+.DS_Store
+
+# Apps
+*.dmg
+.backup/
+.env.local

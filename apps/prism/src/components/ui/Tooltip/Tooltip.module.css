@@ -1,0 +1,57 @@
+.root {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.tooltip {
+  position: absolute;
+  z-index: var(--prism-z-toast);
+  padding: var(--prism-space-2) var(--prism-space-3);
+  max-width: 18rem;
+  background-color: var(--prism-color-bg-elevated);
+  color: var(--prism-color-text);
+  border: 1px solid var(--prism-color-border);
+  border-radius: var(--prism-radius-md);
+  box-shadow: var(--prism-shadow-md);
+  font-size: var(--prism-font-size-xs);
+  line-height: var(--prism-line-height-normal);
+  letter-spacing: var(--prism-letter-spacing-normal);
+  white-space: nowrap;
+  pointer-events: none;
+  animation: prism-tooltip-in var(--prism-motion-duration-fast)
+    var(--prism-motion-ease-decelerate);
+}
+
+.top {
+  bottom: calc(100% + var(--prism-space-2));
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.bottom {
+  top: calc(100% + var(--prism-space-2));
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.left {
+  right: calc(100% + var(--prism-space-2));
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.right {
+  left: calc(100% + var(--prism-space-2));
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+@keyframes prism-tooltip-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

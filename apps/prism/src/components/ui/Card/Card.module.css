@@ -1,0 +1,55 @@
+.root {
+  background-color: var(--prism-color-surface);
+  border: 1px solid var(--prism-color-border);
+  border-radius: var(--prism-radius-lg);
+  color: var(--prism-color-text);
+}
+
+.flat {
+  box-shadow: none;
+}
+
+.raised {
+  box-shadow: var(--prism-shadow-sm);
+}
+
+.floating {
+  box-shadow: var(--prism-shadow-lg);
+}
+
+.pad-none {
+  padding: 0;
+}
+
+.pad-sm {
+  padding: var(--prism-space-3);
+}
+
+.pad-md {
+  padding: var(--prism-space-5);
+}
+
+.pad-lg {
+  padding: var(--prism-space-7);
+}
+
+.interactive {
+  cursor: pointer;
+  transition:
+    background-color var(--prism-motion-duration-fast) var(--prism-motion-ease-standard),
+    border-color var(--prism-motion-duration-fast) var(--prism-motion-ease-standard),
+    box-shadow var(--prism-motion-duration-base) var(--prism-motion-ease-standard),
+    transform var(--prism-motion-duration-base) var(--prism-motion-ease-standard);
+}
+
+.interactive:hover {
+  background-color: var(--prism-color-surface-hover);
+  border-color: var(--prism-color-border-strong);
+  box-shadow: var(--prism-shadow-md);
+  transform: translateY(-2px);
+}
+
+.interactive:active {
+  transform: translateY(0);
+  background-color: var(--prism-color-surface-active);
+}

@@ -1,0 +1,189 @@
+.row {
+  display: grid;
+  grid-template-columns: var(
+    --track-grid,
+    2rem 2.5rem minmax(0, 1.4fr) minmax(0, 1fr) 3rem 4.5rem 2.5rem
+  );
+  align-items: center;
+  gap: var(--prism-space-3);
+  padding: var(--prism-space-2) var(--prism-space-3);
+  border-radius: var(--prism-radius-md);
+  transition: background-color var(--prism-motion-duration-fast) var(--prism-motion-ease-standard);
+}
+
+.row:hover {
+  background-color: var(--prism-color-surface-hover);
+}
+
+.active {
+  background-color: var(--prism-color-surface);
+}
+
+/* Index / play ------------------------------------------------------------- */
+.indexCell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  font-size: var(--prism-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--prism-color-text-subtle);
+}
+
+.index {
+  transition: opacity var(--prism-motion-duration-fast) var(--prism-motion-ease-standard);
+}
+
+.playButton {
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--prism-color-text);
+  background: none;
+  border: none;
+  border-radius: var(--prism-radius-sm);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--prism-motion-duration-fast) var(--prism-motion-ease-standard);
+}
+
+.playButton svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.playButton:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--prism-color-focus-ring);
+  outline-offset: 2px;
+}
+
+.row:hover .index {
+  opacity: 0;
+}
+
+.row:hover .playButton {
+  opacity: 1;
+}
+
+.equalizer {
+  font-size: var(--prism-font-size-sm);
+}
+
+/* Artwork ------------------------------------------------------------------ */
+.artworkCell {
+  width: 2.5rem;
+  height: 2.5rem;
+}
+
+.artwork {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: var(--prism-radius-sm);
+}
+
+.artworkPlaceholder {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--prism-radius-sm);
+  background: linear-gradient(
+    135deg,
+    var(--prism-color-surface-active),
+    var(--prism-color-surface-sunken)
+  );
+}
+
+/* Title -------------------------------------------------------------------- */
+.titleCell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.name {
+  font-size: var(--prism-font-size-sm);
+  font-weight: var(--prism-font-weight-medium);
+  color: var(--prism-color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nameActive {
+  color: var(--prism-color-accent);
+}
+
+.artists {
+  font-size: var(--prism-font-size-xs);
+  color: var(--prism-color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artistLink:hover {
+  color: var(--prism-color-text);
+  text-decoration: underline;
+}
+
+/* Album -------------------------------------------------------------------- */
+.albumCell {
+  min-width: 0;
+}
+
+.albumLink {
+  display: block;
+  font-size: var(--prism-font-size-xs);
+  color: var(--prism-color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.albumLink:hover {
+  color: var(--prism-color-text);
+  text-decoration: underline;
+}
+
+/* Like / duration / menu --------------------------------------------------- */
+.likeCell {
+  display: flex;
+  justify-content: center;
+}
+
+.likeActive {
+  color: var(--prism-color-accent);
+}
+
+.durationCell {
+  font-size: var(--prism-font-size-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--prism-color-text-subtle);
+  text-align: right;
+}
+
+.menuCell {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Responsive --------------------------------------------------------------- */
+@media (max-width: 48rem) {
+  .row {
+    grid-template-columns: var(
+      --track-grid-compact,
+      2rem 2.5rem minmax(0, 1fr) 3rem 4.5rem 2.5rem
+    );
+  }
+
+  .albumCell {
+    display: none;
+  }
+}
