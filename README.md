@@ -3,6 +3,25 @@
 Monorepo d'outillage de développement. Il regroupe le workspace Rust **devx** (CLI, core,
 fichiers, tools et TUI) ainsi que plusieurs applications (SPA web et paquets Swift).
 
+## Installation
+
+Installer le binaire `devx` sur un autre poste (Linux/macOS), sans cloner le dépôt.
+Le script installe Rust via rustup s'il est absent, puis compile et installe `devx`
+dans `~/.cargo/bin` :
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/divine0x001/devSetup/main/devx/install.sh | sh
+```
+
+Depuis un checkout local :
+
+```sh
+./devx/install.sh
+```
+
+Assure-toi que `~/.cargo/bin` est dans ton `PATH` (ajoute
+`export PATH="$HOME/.cargo/bin:$PATH"` à ton `~/.bashrc` ou `~/.zshrc`).
+
 ## Layout
 
 - `devx/` — workspace Rust (crates : `devx-cli`, `devx-core`, `devx-files`, `devx-tools`,

@@ -1,5 +1,6 @@
 //! État applicatif de la TUI : arbre de fichiers, éditeur, sortie, événements.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -30,7 +31,7 @@ const MAX_ENTRIES: usize = 20_000;
 const IGNORED_DIRS: [&str; 3] = [".git", "target", "node_modules"];
 
 /// Commandes éditeur disponibles dans le mode `:` (nom, description).
-const EDITOR_COMMANDS: [(&str, &str); 8] = [
+const EDITOR_COMMANDS: [(&str, &str); 9] = [
     (":help", "liste toutes les commandes disponibles"),
     (":w", "sauvegarde le fichier courant"),
     (":wq", "sauvegarde puis quitte"),
@@ -39,6 +40,10 @@ const EDITOR_COMMANDS: [(&str, &str); 8] = [
     (
         ":e <fichier>",
         "ouvre un fichier et passe le focus à l'éditeur",
+    ),
+    (
+        ":new <fichier>",
+        "crée un nouveau fichier et l'ouvre dans l'éditeur",
     ),
     (":git", "affiche un rapport git à la place du code"),
     (":code", "revient à la vue code (arbre + éditeur)"),
@@ -284,6 +289,13 @@ impl App {
                     self.toggle_view();
                     return;
                 }
+                KeyCode::Char('n') => {
+                    self.mode = Mode::Command;
+                    self.input = "new ".to_string();
+                    self.palette_selected = 0;
+                    self.status = "nouveau fichier — tape le nom puis Entrée".to_string();
+                    return;
+                }
                 _ => {}
             }
         }
@@ -418,6 +430,15 @@ impl App {
     /// Recharge l'état git depuis le workspace.
     pub fn refresh_git(&mut self) {
         self.git = load_git(&self.ctx.workspace.root);
+    }
+
+    /// Re-scan l'arbre de fichiers en préservant l'état déplié des répertoires.
+    pub fn refresh_tree(&mut self) {
+        let expanded: HashSet<PathBuf> = self.nodes.iter().flat_map(expanded_paths).collect();
+        let mut budget = MAX_ENTRIES;
+        let mut nodes = scan_dir(&self.ctx.workspace.root, MAX_DEPTH, &mut budget);
+        restore_expanded(&mut nodes, &expanded);
+        self.nodes = nodes;
     }
 
     fn on_key_tree(&mut self, key: KeyEvent) {
@@ -641,6 +662,43 @@ impl App {
                 }
                 true
             }
+            "new" => {
+                let Some(file) = args.first() else {
+                    self.output.push("usage: :new <fichier>".to_string());
+                    return true;
+                };
+                let raw = Path::new(file);
+                if raw.is_absolute() {
+                    self.output
+                        .push("error: chemin absolu refusé (relatif au workspace)".to_string());
+                    return true;
+                }
+                let path = self.ctx.workspace.root.join(raw);
+                // Garde-fou : le chemin résolu ne doit pas sortir du workspace.
+                if !path
+                    .strip_prefix(&self.ctx.workspace.root)
+                    .map(|p| {
+                        !p.components()
+                            .any(|c| matches!(c, std::path::Component::ParentDir))
+                    })
+                    .unwrap_or(false)
+                {
+                    self.output
+                        .push("error: chemin invalide (fuite hors workspace)".to_string());
+                    return true;
+                }
+                if let Some(parent) = path.parent() {
+                    if let Err(err) = fs::create_dir_all(parent) {
+                        self.output.push(format!("error: :new {err}"));
+                        return true;
+                    }
+                }
+                self.editor = Buffer::empty_with_path(&path);
+                self.focus = Focus::Editor;
+                self.refresh_tree();
+                self.status = format!("nouveau fichier {} — :w pour sauvegarder", path.display());
+                true
+            }
             _ => false,
         }
     }
@@ -656,6 +714,7 @@ impl App {
                     .unwrap_or_default();
                 self.output.push(format!("saved {path}"));
                 self.status = "sauvegardé".to_string();
+                self.refresh_tree();
             }
             Err(err) => {
                 self.output.push(format!("error: {err}"));
@@ -828,6 +887,28 @@ fn scan_dir(dir: &Path, depth: usize, budget: &mut usize) -> Vec<Node> {
     nodes
 }
 
+/// Collecte les chemins des répertoires dépliés (récursif).
+fn expanded_paths(node: &Node) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if node.is_dir && node.expanded {
+        out.push(node.path.clone());
+    }
+    for child in &node.children {
+        out.extend(expanded_paths(child));
+    }
+    out
+}
+
+/// Ré-applique l'état déplié à partir d'un jeu de chemins.
+fn restore_expanded(nodes: &mut [Node], expanded: &HashSet<PathBuf>) {
+    for node in nodes {
+        if node.is_dir && expanded.contains(&node.path) {
+            node.expanded = true;
+        }
+        restore_expanded(&mut node.children, expanded);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -842,6 +923,21 @@ mod tests {
 
     fn app() -> App {
         let ctx = Context::with_root(".");
+        let exec: Executor = Box::new(|_ctx, _cmd, _args| Ok(Output::empty()));
+        App::new(ctx, specs(), exec, None)
+    }
+
+    /// Workspace temporaire isolé (avec `devx.toml` pour figer la détection).
+    fn temp_workspace(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("devx-tui-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("devx.toml"), "").unwrap();
+        dir
+    }
+
+    fn app_at(root: &Path) -> App {
+        let ctx = Context::with_root(root);
         let exec: Executor = Box::new(|_ctx, _cmd, _args| Ok(Output::empty()));
         App::new(ctx, specs(), exec, None)
     }
@@ -933,6 +1029,92 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_n_prefills_new_command() {
+        let mut app = app();
+        app.on_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL));
+        assert_eq!(app.mode, Mode::Command);
+        assert_eq!(app.input, "new ");
+    }
+
+    #[test]
+    fn new_command_without_arg_shows_usage() {
+        let mut app = app();
+        app.input = "new".to_string();
+        app.submit();
+        assert!(app.output.iter().any(|l| l.contains("usage: :new")));
+        assert!(app.editor.path.is_none());
+    }
+
+    #[test]
+    fn new_command_opens_empty_buffer_linked_to_path() {
+        let root = temp_workspace("new-buffer");
+        let mut app = app_at(&root);
+        app.input = "new sub/hello.rs".to_string();
+        app.submit();
+        let expected = root.join("sub/hello.rs");
+        assert_eq!(app.focus, Focus::Editor);
+        assert_eq!(app.editor.path.as_deref(), Some(expected.as_path()));
+        assert!(!app.editor.dirty);
+        assert!(root.join("sub").is_dir());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn new_command_rejects_absolute_path() {
+        let root = temp_workspace("new-abs");
+        let mut app = app_at(&root);
+        app.input = "new /etc/passwd".to_string();
+        app.submit();
+        assert!(app.output.iter().any(|l| l.contains("absolu")));
+        assert!(app.editor.path.is_none());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn new_command_rejects_parent_escape() {
+        let root = temp_workspace("new-escape");
+        let mut app = app_at(&root);
+        app.input = "new ../evil.txt".to_string();
+        app.submit();
+        assert!(app.output.iter().any(|l| l.contains("invalide")));
+        assert!(app.editor.path.is_none());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn new_then_save_creates_file_and_refreshes_tree() {
+        let root = temp_workspace("new-save");
+        let mut app = app_at(&root);
+        app.input = "new note.txt".to_string();
+        app.submit();
+        assert!(!app.visible().iter().any(|v| v.name == "note.txt"));
+        app.input = "w".to_string();
+        app.submit();
+        assert!(root.join("note.txt").is_file());
+        assert!(app.visible().iter().any(|v| v.name == "note.txt"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn refresh_tree_preserves_expanded_dirs() {
+        let root = temp_workspace("refresh-expand");
+        fs::create_dir_all(root.join("dir")).unwrap();
+        fs::write(root.join("dir/f.txt"), "x").unwrap();
+        let mut app = app_at(&root);
+        let idx = app
+            .visible()
+            .iter()
+            .position(|v| v.name == "dir")
+            .expect("dir présent");
+        app.selection = idx;
+        app.set_expanded(true);
+        assert!(app.visible().iter().any(|v| v.name == "f.txt"));
+        app.refresh_tree();
+        assert!(app.visible().iter().any(|v| v.name == "f.txt"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn help_command_lists_editor_and_modules() {
         let mut app = app();
         app.input = "help".to_string();
@@ -940,6 +1122,7 @@ mod tests {
         let joined = app.output.join("\n");
         assert!(joined.contains(":wq"));
         assert!(joined.contains(":e <fichier>"));
+        assert!(joined.contains(":new <fichier>"));
         assert!(joined.contains("grep"));
     }
 
