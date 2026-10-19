@@ -331,6 +331,23 @@ impl Buffer {
         None
     }
 
+    /// Indices (en `char`) de départ de chaque occurrence non chevauchante de
+    /// `query` sur la ligne `row`. Vide si `query` est vide ou `row` hors borne.
+    pub fn line_match_starts(&self, row: usize, query: &str) -> Vec<usize> {
+        if query.is_empty() || row >= self.lines.len() {
+            return Vec::new();
+        }
+        let hay: Vec<char> = self.lines[row].chars().collect();
+        let width = query.chars().count();
+        let mut starts = Vec::new();
+        let mut from = 0;
+        while let Some(i) = find_in_chars(&hay, query, from) {
+            starts.push(i);
+            from = i + width;
+        }
+        starts
+    }
+
     /// Insère `width` espaces à la position du curseur (touche Tab).
     pub fn insert_tab(&mut self, width: usize) {
         if width == 0 {
@@ -810,5 +827,18 @@ mod tests {
         assert_eq!(b.find_from("zzz", 0, 0), None);
         // Motif plus long que la ligne.
         assert_eq!(b.find_from("abcdef", 0, 0), None);
+    }
+
+    #[test]
+    fn line_match_starts_lists_non_overlapping_occurrences() {
+        let b = buf(&["aXbXcX", "none"]);
+        assert_eq!(b.line_match_starts(0, "X"), vec![1, 3, 5]);
+        // Non chevauchant : "aa" dans "aaaa" → positions 0 et 2.
+        let b2 = buf(&["aaaa"]);
+        assert_eq!(b2.line_match_starts(0, "aa"), vec![0, 2]);
+        // Absent / vide / hors borne.
+        assert!(b.line_match_starts(1, "X").is_empty());
+        assert!(b.line_match_starts(0, "").is_empty());
+        assert!(b.line_match_starts(9, "X").is_empty());
     }
 }

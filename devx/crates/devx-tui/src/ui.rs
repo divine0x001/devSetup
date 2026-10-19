@@ -239,10 +239,24 @@ fn draw_editor(frame: &mut Frame, area: Rect, app: &mut App) {
         .title(" Éditeur ")
         .border_style(border);
 
+    let search = if app.mode == Mode::Search && !app.search_query.is_empty() {
+        Some(app.search_query.as_str())
+    } else {
+        None
+    };
     let contents = if inner_h == 0 {
         Vec::new()
     } else {
-        build_editor_lines(app.editor(), row, col, y_offset, x_offset, text_w, inner_h)
+        build_editor_lines(
+            app.editor(),
+            row,
+            col,
+            y_offset,
+            x_offset,
+            text_w,
+            inner_h,
+            search,
+        )
     };
 
     frame.render_widget(Paragraph::new(contents).block(block), area);
@@ -352,6 +366,7 @@ fn status_color(entry: &str) -> Color {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_editor_lines(
     editor: &crate::editor::Buffer,
     row: usize,
@@ -360,11 +375,19 @@ fn build_editor_lines(
     x_offset: usize,
     text_w: usize,
     inner_h: usize,
+    search: Option<&str>,
 ) -> Vec<Line<'static>> {
     let lines = &editor.lines;
+    let match_width = search.map(|q| q.chars().count()).unwrap_or(0);
     let mut out: Vec<Line> = Vec::with_capacity(inner_h);
     for (idx, text) in lines.iter().enumerate().skip(y_offset).take(inner_h) {
         let is_cursor = idx == row;
+        // Colonnes couvertes par une occurrence du motif de recherche.
+        let matches = match search {
+            Some(q) => editor.line_match_starts(idx, q),
+            None => Vec::new(),
+        };
+        let in_match = |i: usize| matches.iter().any(|&s| i >= s && i < s + match_width);
         let gutter = Span::styled(
             format!("{:>3} │ ", idx + 1),
             Style::default().fg(Color::DarkGray),
@@ -380,6 +403,14 @@ fn build_editor_lines(
                     Style::default()
                         .bg(Color::Yellow)
                         .fg(Color::Black)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            } else if in_match(i) {
+                spans.push(Span::styled(
+                    owned,
+                    Style::default()
+                        .bg(Color::Blue)
+                        .fg(Color::White)
                         .add_modifier(Modifier::BOLD),
                 ));
             } else {
@@ -711,5 +742,24 @@ mod tests {
             screen.contains("notes.txt*"),
             "indicateur de modification manquant:\n{screen}"
         );
+    }
+
+    #[test]
+    fn search_mode_highlights_matches() {
+        let ctx = Context::with_root(".");
+        let specs = vec![CommandSpec::new("tree", "arborescence", "tree")];
+        let exec: Executor = Box::new(|_c, _cmd, _args| Ok(Output::empty()));
+        let mut app = App::new(ctx, specs, exec, None);
+        app.focus = Focus::Editor;
+        app.editor_mut().lines = vec!["trouve ceci ici".to_string()];
+        app.mode = Mode::Search;
+        app.search_query = "ceci".to_string();
+
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let highlighted =
+            (0..30).any(|y| (0..100).any(|x| buffer[(x, y)].style().bg == Some(Color::Blue)));
+        assert!(highlighted, "aucune occurrence du motif n'est surlignée");
     }
 }
