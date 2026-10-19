@@ -93,6 +93,13 @@ impl Buffer {
         self.selection_anchor = None;
     }
 
+    /// Sélectionne tout le tampon (ancre au début, curseur à la fin).
+    pub fn select_all(&mut self) {
+        self.selection_anchor = Some((0, 0));
+        self.cursor_row = self.lines.len() - 1;
+        self.cursor_col = self.line_len(self.cursor_row);
+    }
+
     /// Bornes normalisées `(début, fin)` de la sélection, ou `None` si vide.
     pub fn selection_range(&self) -> Option<((usize, usize), (usize, usize))> {
         let anchor = self.selection_anchor?;
@@ -1177,6 +1184,14 @@ mod tests {
         b.cursor_col = 1;
         b.selection_anchor = Some((0, 4));
         assert_eq!(b.selection_range(), Some(((0, 1), (0, 4))));
+    }
+
+    #[test]
+    fn select_all_covers_whole_buffer() {
+        let mut b = buf(&["abc", "de"]);
+        b.select_all();
+        assert_eq!(b.selection_range(), Some(((0, 0), (1, 2))));
+        assert_eq!(b.selected_text().as_deref(), Some("abc\nde"));
     }
 
     #[test]

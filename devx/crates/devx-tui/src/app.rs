@@ -60,10 +60,11 @@ const EDITOR_COMMANDS: [(&str, &str); 15] = [
 ];
 
 /// Raccourcis clavier de l'éditeur (touche, description), affichés par `:help`.
-const EDITOR_SHORTCUTS: [(&str, &str); 13] = [
+const EDITOR_SHORTCUTS: [(&str, &str); 14] = [
     ("Ctrl-S", "sauvegarde le fichier courant"),
     ("Ctrl-Z / Ctrl-Y", "annule / rétablit"),
     ("Maj + flèches", "sélectionne du texte"),
+    ("Ctrl-A", "tout sélectionner"),
     ("Ctrl-C/X/V", "copier / couper / coller"),
     ("Ctrl-F", "recherche incrémentale (Entrée: suivant)"),
     ("Ctrl-D / Ctrl-K", "duplique / supprime la ligne"),
@@ -366,6 +367,13 @@ impl App {
                         }
                     }
                     self.should_quit = true;
+                    return;
+                }
+                KeyCode::Char('a') => {
+                    if self.focus == Focus::Editor {
+                        self.editor_mut().select_all();
+                        self.status = "tout sélectionné".to_string();
+                    }
                     return;
                 }
                 KeyCode::Char('x') => {
