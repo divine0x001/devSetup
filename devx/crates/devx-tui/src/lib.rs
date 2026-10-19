@@ -14,6 +14,7 @@
 
 mod app;
 mod editor;
+mod tree;
 mod ui;
 
 pub use app::{
