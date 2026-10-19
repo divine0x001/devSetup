@@ -59,6 +59,21 @@ const EDITOR_COMMANDS: [(&str, &str); 15] = [
     (":code", "revient à la vue code (arbre + éditeur)"),
 ];
 
+/// Raccourcis clavier de l'éditeur (touche, description), affichés par `:help`.
+const EDITOR_SHORTCUTS: [(&str, &str); 11] = [
+    ("Ctrl-S", "sauvegarde le fichier courant"),
+    ("Ctrl-Z / Ctrl-Y", "annule / rétablit"),
+    ("Ctrl-F", "recherche incrémentale (Entrée: suivant)"),
+    ("Ctrl-D / Ctrl-K", "duplique / supprime la ligne"),
+    ("Ctrl-W", "supprime le mot précédent"),
+    ("Ctrl-←/→", "onglet précédent / suivant"),
+    ("Ctrl-P", "palette de commandes"),
+    ("Alt-←/→", "déplacement par mot"),
+    ("Alt-↑/↓", "déplace la ligne"),
+    ("Ctrl-Home/End", "début / fin du document"),
+    ("Tab / Maj-Tab", "indente / désindente"),
+];
+
 /// Paneau qui reçoit les frappes de navigation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -313,6 +328,11 @@ impl App {
         let mut lines = vec!["devx — commandes :".to_string(), "[éditeur]".to_string()];
         for (name, description) in EDITOR_COMMANDS {
             lines.push(format!("  {:<18} {description}", name));
+        }
+        lines.push(String::new());
+        lines.push("[raccourcis]".to_string());
+        for (keys, description) in EDITOR_SHORTCUTS {
+            lines.push(format!("  {:<18} {description}", keys));
         }
         lines.push(String::new());
         lines.push("[modules]".to_string());
@@ -1843,6 +1863,18 @@ mod tests {
         app.submit();
         assert_eq!(app.active, 2);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn help_lists_keyboard_shortcuts() {
+        let mut app = app();
+        app.input = "help".to_string();
+        app.submit();
+        let joined = app.output.join("\n");
+        assert!(joined.contains("[raccourcis]"));
+        assert!(joined.contains("Ctrl-Z"));
+        assert!(joined.contains("Ctrl-F"));
+        assert!(joined.contains("Alt-↑/↓"));
     }
 
     #[test]
