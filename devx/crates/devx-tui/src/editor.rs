@@ -281,6 +281,31 @@ impl Buffer {
         self.cursor_col = 0;
     }
 
+    /// Remonte le curseur de `n` lignes (au moins une), borné au début.
+    pub fn page_up(&mut self, n: usize) {
+        self.cursor_row = self.cursor_row.saturating_sub(n.max(1));
+        self.clamp_col();
+    }
+
+    /// Descend le curseur de `n` lignes (au moins une), borné à la fin.
+    pub fn page_down(&mut self, n: usize) {
+        let last = self.lines.len() - 1;
+        self.cursor_row = (self.cursor_row + n.max(1)).min(last);
+        self.clamp_col();
+    }
+
+    /// Place le curseur au tout début du document.
+    pub fn move_doc_start(&mut self) {
+        self.cursor_row = 0;
+        self.cursor_col = 0;
+    }
+
+    /// Place le curseur à la toute fin du document.
+    pub fn move_doc_end(&mut self) {
+        self.cursor_row = self.lines.len() - 1;
+        self.cursor_col = self.line_len(self.cursor_row);
+    }
+
     /// Insère `width` espaces à la position du curseur (touche Tab).
     pub fn insert_tab(&mut self, width: usize) {
         if width == 0 {
@@ -670,5 +695,49 @@ mod tests {
         b.backspace(); // début de tampon : aucun effet
         assert!(!b.dirty);
         assert!(!b.undo());
+    }
+
+    // --- navigation par page / document ---
+
+    fn buffer_of(n: usize) -> Buffer {
+        let mut b = Buffer::empty();
+        b.lines = (0..n).map(|i| format!("ligne {i}")).collect();
+        b
+    }
+
+    #[test]
+    fn page_down_and_up_clamp_to_bounds() {
+        let mut b = buffer_of(10);
+        b.page_down(4);
+        assert_eq!(b.cursor_row, 4);
+        b.page_down(100);
+        assert_eq!(b.cursor_row, 9); // borné à la dernière ligne
+        b.page_up(3);
+        assert_eq!(b.cursor_row, 6);
+        b.page_up(100);
+        assert_eq!(b.cursor_row, 0);
+    }
+
+    #[test]
+    fn page_moves_clamp_the_column() {
+        let mut b = buffer_of(3);
+        b.lines[0] = "court".to_string();
+        b.lines[2] = "x".to_string();
+        b.cursor_row = 0;
+        b.move_end(); // colonne 5
+        b.page_down(2);
+        assert_eq!(b.cursor_row, 2);
+        assert_eq!(b.cursor_col, 1); // bornée à la longueur de "x"
+    }
+
+    #[test]
+    fn doc_start_and_end_jump_to_extremes() {
+        let mut b = buffer_of(5);
+        b.lines[4] = "fin".to_string();
+        b.cursor_row = 2;
+        b.move_doc_end();
+        assert_eq!((b.cursor_row, b.cursor_col), (4, 3));
+        b.move_doc_start();
+        assert_eq!((b.cursor_row, b.cursor_col), (0, 0));
     }
 }

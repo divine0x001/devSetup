@@ -421,6 +421,14 @@ impl App {
                     self.switch_tab(1);
                     return;
                 }
+                KeyCode::Home if self.focus == Focus::Editor => {
+                    self.editor_mut().move_doc_start();
+                    return;
+                }
+                KeyCode::End if self.focus == Focus::Editor => {
+                    self.editor_mut().move_doc_end();
+                    return;
+                }
                 _ => {}
             }
         }
@@ -607,6 +615,13 @@ impl App {
         }
     }
 
+    /// Nombre de lignes par « page » (hauteur interne de l'éditeur, ≥ 1).
+    fn editor_page(&self) -> usize {
+        (self.layout.editor.height as usize)
+            .saturating_sub(2)
+            .max(1)
+    }
+
     fn on_key_editor(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Up => self.editor_mut().move_up(),
@@ -615,6 +630,14 @@ impl App {
             KeyCode::Right => self.editor_mut().move_right(),
             KeyCode::Home => self.editor_mut().move_home(),
             KeyCode::End => self.editor_mut().move_end(),
+            KeyCode::PageUp => {
+                let page = self.editor_page();
+                self.editor_mut().page_up(page);
+            }
+            KeyCode::PageDown => {
+                let page = self.editor_page();
+                self.editor_mut().page_down(page);
+            }
             KeyCode::Backspace => self.editor_mut().backspace(),
             KeyCode::Delete => self.editor_mut().delete(),
             KeyCode::Enter => self.editor_mut().insert_newline(),
