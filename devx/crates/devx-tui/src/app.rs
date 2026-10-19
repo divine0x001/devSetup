@@ -60,9 +60,11 @@ const EDITOR_COMMANDS: [(&str, &str); 15] = [
 ];
 
 /// Raccourcis clavier de l'éditeur (touche, description), affichés par `:help`.
-const EDITOR_SHORTCUTS: [(&str, &str); 11] = [
+const EDITOR_SHORTCUTS: [(&str, &str); 13] = [
     ("Ctrl-S", "sauvegarde le fichier courant"),
     ("Ctrl-Z / Ctrl-Y", "annule / rétablit"),
+    ("Maj + flèches", "sélectionne du texte"),
+    ("Ctrl-C/X/V", "copier / couper / coller"),
     ("Ctrl-F", "recherche incrémentale (Entrée: suivant)"),
     ("Ctrl-D / Ctrl-K", "duplique / supprime la ligne"),
     ("Ctrl-W", "supprime le mot précédent"),
@@ -154,6 +156,8 @@ pub struct App {
     pub search_query: String,
     /// Position du curseur à l'entrée en recherche (pour annuler/boucler).
     search_origin: (usize, usize),
+    /// Presse-papier interne (copier/couper/coller), partagé entre onglets.
+    clipboard: String,
     /// Message de statut.
     pub status: String,
     /// Vue principale courante.
@@ -220,6 +224,7 @@ impl App {
             palette_selected: 0,
             search_query: String::new(),
             search_origin: (0, 0),
+            clipboard: String::new(),
             status: "prêt".to_string(),
             view: View::Code,
             git: GitState::default(),
@@ -351,7 +356,34 @@ impl App {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 KeyCode::Char('c') => {
+                    // Copie la sélection si l'éditeur en a une ; sinon quitte.
+                    if self.focus == Focus::Editor {
+                        if let Some(text) = self.editor().selected_text() {
+                            self.clipboard = text;
+                            self.editor_mut().clear_selection();
+                            self.status = "copié".to_string();
+                            return;
+                        }
+                    }
                     self.should_quit = true;
+                    return;
+                }
+                KeyCode::Char('x') => {
+                    if self.focus == Focus::Editor {
+                        if let Some(text) = self.editor().selected_text() {
+                            self.clipboard = text;
+                            self.editor_mut().delete_selection();
+                            self.status = "coupé".to_string();
+                        }
+                    }
+                    return;
+                }
+                KeyCode::Char('v') => {
+                    if self.focus == Focus::Editor && !self.clipboard.is_empty() {
+                        let text = self.clipboard.clone();
+                        self.editor_mut().insert_str(&text);
+                        self.status = "collé".to_string();
+                    }
                     return;
                 }
                 KeyCode::Char('p') => {
@@ -1755,6 +1787,50 @@ mod tests {
         app.on_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::NONE));
         assert_eq!(app.editor().lines[0], "Xllo");
         assert!(app.editor().selection_range().is_none());
+    }
+
+    #[test]
+    fn copy_then_paste_duplicates_selection() {
+        let mut app = app();
+        app.focus = Focus::Editor;
+        app.editor_mut().lines = vec!["hello".to_string()];
+        // Sélectionne "hel".
+        for _ in 0..3 {
+            app.on_key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT));
+        }
+        app.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert!(
+            !app.should_quit,
+            "Ctrl-C avec sélection copie, ne quitte pas"
+        );
+        assert_eq!(app.editor().cursor_col, 3);
+        // Colle à la position courante (après "hel").
+        app.on_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL));
+        assert_eq!(app.editor().lines[0], "helhello");
+    }
+
+    #[test]
+    fn cut_removes_selection_into_clipboard() {
+        let mut app = app();
+        app.focus = Focus::Editor;
+        app.editor_mut().lines = vec!["hello".to_string()];
+        for _ in 0..2 {
+            app.on_key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT));
+        }
+        app.on_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL));
+        assert_eq!(app.editor().lines[0], "llo");
+        app.on_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL));
+        assert_eq!(app.editor().lines[0], "llohe");
+    }
+
+    #[test]
+    fn ctrl_c_without_selection_quits() {
+        let mut app = app();
+        app.focus = Focus::Editor;
+        app.editor_mut().lines = vec!["hello".to_string()];
+        app.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert!(app.should_quit);
     }
 
     #[test]
