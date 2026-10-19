@@ -34,8 +34,9 @@ const MAX_ENTRIES: usize = 20_000;
 const IGNORED_DIRS: [&str; 3] = [".git", "target", "node_modules"];
 
 /// Commandes éditeur disponibles dans le mode `:` (nom, description).
-const EDITOR_COMMANDS: [(&str, &str); 12] = [
+const EDITOR_COMMANDS: [(&str, &str); 13] = [
     (":help", "liste toutes les commandes disponibles"),
+    (":<n> | :goto <n>", "place le curseur sur la ligne n"),
     (":w", "sauvegarde le fichier courant"),
     (":wq", "sauvegarde puis quitte"),
     (":q", "quitte (refusé si modifications en attente)"),
@@ -856,7 +857,19 @@ impl App {
 
     /// Gère les commandes éditeur du mode `:`. Renvoie `true` si consommée.
     fn handle_editor_command(&mut self, command: &str, args: &[String]) -> bool {
+        // `:<n>` (commande purement numérique) saute à la ligne n.
+        if let Ok(n) = command.parse::<usize>() {
+            self.goto_line(n);
+            return true;
+        }
         match command {
+            "goto" => {
+                match args.first().and_then(|a| a.parse::<usize>().ok()) {
+                    Some(n) => self.goto_line(n),
+                    None => self.output.push("usage: :goto <ligne>".to_string()),
+                }
+                true
+            }
             "help" => {
                 for line in self.help_text() {
                     self.output.push(line);
@@ -980,6 +993,21 @@ impl App {
                 self.status = "erreur".to_string();
             }
         }
+    }
+
+    /// Déplace le curseur sur la ligne `n` (1-based, bornée), bascule en vue
+    /// code et donne le focus à l'éditeur.
+    fn goto_line(&mut self, n: usize) {
+        if self.view != View::Code {
+            self.open_code_view();
+        }
+        let last = self.editor().lines.len();
+        let target = n.clamp(1, last.max(1)) - 1;
+        let ed = self.editor_mut();
+        ed.cursor_row = target;
+        ed.cursor_col = 0;
+        self.focus = Focus::Editor;
+        self.status = format!("ligne {}", target + 1);
     }
 }
 
@@ -1657,6 +1685,39 @@ mod tests {
         app.on_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
         type_in_search(&mut app, "zzz");
         assert!(app.status.contains("introuvable"));
+    }
+
+    // --- aller à la ligne ---
+
+    #[test]
+    fn numeric_command_jumps_to_line() {
+        let mut app = app();
+        app.editor_mut().lines = (1..=10).map(|i| format!("l{i}")).collect();
+        app.input = "3".to_string();
+        app.submit();
+        assert_eq!(app.editor().cursor_row, 2); // ligne 3 → index 2
+        assert_eq!(app.editor().cursor_col, 0);
+        assert_eq!(app.focus, Focus::Editor);
+    }
+
+    #[test]
+    fn goto_clamps_out_of_range_line() {
+        let mut app = app();
+        app.editor_mut().lines = vec!["a".to_string(), "b".to_string()];
+        app.input = "999".to_string();
+        app.submit();
+        assert_eq!(app.editor().cursor_row, 1); // borné à la dernière ligne
+    }
+
+    #[test]
+    fn goto_command_from_git_view_returns_to_code() {
+        let mut app = app();
+        app.editor_mut().lines = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        app.view = View::Git;
+        app.input = "goto 2".to_string();
+        app.submit();
+        assert_eq!(app.view, View::Code);
+        assert_eq!(app.editor().cursor_row, 1);
     }
 
     #[test]
