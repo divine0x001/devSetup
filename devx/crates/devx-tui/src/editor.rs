@@ -325,6 +325,30 @@ impl Buffer {
         self.cursor_col = self.line_len(self.cursor_row);
     }
 
+    /// Échange la ligne courante avec celle du dessus ; le curseur suit.
+    pub fn move_line_up(&mut self) {
+        if self.cursor_row == 0 {
+            return;
+        }
+        self.record(EditKind::Other);
+        self.lines.swap(self.cursor_row, self.cursor_row - 1);
+        self.cursor_row -= 1;
+        self.clamp_col();
+        self.mark_dirty();
+    }
+
+    /// Échange la ligne courante avec celle du dessous ; le curseur suit.
+    pub fn move_line_down(&mut self) {
+        if self.cursor_row + 1 >= self.lines.len() {
+            return;
+        }
+        self.record(EditKind::Other);
+        self.lines.swap(self.cursor_row, self.cursor_row + 1);
+        self.cursor_row += 1;
+        self.clamp_col();
+        self.mark_dirty();
+    }
+
     /// Recule le curseur au début du mot précédent (saute les espaces puis le
     /// mot). En début de ligne, passe à la fin de la ligne précédente.
     pub fn move_word_left(&mut self) {
@@ -895,6 +919,36 @@ mod tests {
         b.page_down(2);
         assert_eq!(b.cursor_row, 2);
         assert_eq!(b.cursor_col, 1); // bornée à la longueur de "x"
+    }
+
+    #[test]
+    fn move_line_up_and_down_swap_and_carry_cursor() {
+        let mut b = buf(&["un", "deux", "trois"]);
+        b.cursor_row = 1; // "deux"
+        b.move_line_up();
+        assert_eq!(b.lines, vec!["deux", "un", "trois"]);
+        assert_eq!(b.cursor_row, 0);
+        b.move_line_down();
+        assert_eq!(b.lines, vec!["un", "deux", "trois"]);
+        assert_eq!(b.cursor_row, 1);
+    }
+
+    #[test]
+    fn move_line_is_noop_at_edges_and_undoable() {
+        let mut b = buf(&["un", "deux"]);
+        // Haut depuis la 1re ligne : sans effet.
+        b.cursor_row = 0;
+        b.move_line_up();
+        assert_eq!(b.lines, vec!["un", "deux"]);
+        // Bas depuis la dernière : sans effet.
+        b.cursor_row = 1;
+        b.move_line_down();
+        assert_eq!(b.lines, vec!["un", "deux"]);
+        // Une opération réelle est annulable.
+        b.move_line_up();
+        assert_eq!(b.lines, vec!["deux", "un"]);
+        b.undo();
+        assert_eq!(b.lines, vec!["un", "deux"]);
     }
 
     #[test]

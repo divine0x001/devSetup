@@ -607,6 +607,8 @@ impl App {
         match key.code {
             KeyCode::Left if alt => self.editor_mut().move_word_left(),
             KeyCode::Right if alt => self.editor_mut().move_word_right(),
+            KeyCode::Up if alt => self.editor_mut().move_line_up(),
+            KeyCode::Down if alt => self.editor_mut().move_line_down(),
             KeyCode::Up => self.editor_mut().move_up(),
             KeyCode::Down => self.editor_mut().move_down(),
             KeyCode::Left => self.editor_mut().move_left(),
@@ -1597,6 +1599,20 @@ mod tests {
         }
         app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::ALT));
         assert_eq!(app.editor().cursor_col, 4); // début de "bar"
+    }
+
+    #[test]
+    fn alt_down_moves_line_in_editor() {
+        let mut app = app();
+        app.focus = Focus::Editor;
+        app.editor_mut().lines = vec!["un".to_string(), "deux".to_string()];
+        app.editor_mut().cursor_row = 0;
+        app.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT));
+        assert_eq!(
+            app.editor().lines,
+            vec!["deux".to_string(), "un".to_string()]
+        );
+        assert_eq!(app.editor().cursor_row, 1);
     }
 
     // --- aller à la ligne ---
