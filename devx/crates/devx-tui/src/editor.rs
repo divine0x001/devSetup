@@ -306,6 +306,31 @@ impl Buffer {
         self.cursor_col = self.line_len(self.cursor_row);
     }
 
+    /// Cherche la prochaine occurrence de `query` à partir de
+    /// `(from_row, from_col)` (incluse), en bouclant sur le document. Renvoie
+    /// la position `(row, col)` en indices de `char`, ou `None` si `query` est
+    /// vide ou introuvable. La recherche est sensible à la casse.
+    pub fn find_from(
+        &self,
+        query: &str,
+        from_row: usize,
+        from_col: usize,
+    ) -> Option<(usize, usize)> {
+        if query.is_empty() {
+            return None;
+        }
+        let n = self.lines.len();
+        for i in 0..=n {
+            let row = (from_row + i) % n;
+            let start = if i == 0 { from_col } else { 0 };
+            let hay: Vec<char> = self.lines[row].chars().collect();
+            if let Some(col) = find_in_chars(&hay, query, start) {
+                return Some((row, col));
+            }
+        }
+        None
+    }
+
     /// Insère `width` espaces à la position du curseur (touche Tab).
     pub fn insert_tab(&mut self, width: usize) {
         if width == 0 {
@@ -369,6 +394,17 @@ impl Buffer {
     fn clamp_col(&mut self) {
         self.cursor_col = self.cursor_col.min(self.line_len(self.cursor_row));
     }
+}
+
+/// Indice du premier `needle` dans `hay` (slices de `char`) à partir de
+/// `start`, ou `None`. `needle` vide ou plus long que `hay` renvoie `None`.
+fn find_in_chars(hay: &[char], needle: &str, start: usize) -> Option<usize> {
+    let needle: Vec<char> = needle.chars().collect();
+    if needle.is_empty() || needle.len() > hay.len() {
+        return None;
+    }
+    let last = hay.len() - needle.len();
+    (start..=last).find(|&i| hay[i..i + needle.len()] == needle[..])
 }
 
 #[cfg(test)]
@@ -739,5 +775,40 @@ mod tests {
         assert_eq!((b.cursor_row, b.cursor_col), (4, 3));
         b.move_doc_start();
         assert_eq!((b.cursor_row, b.cursor_col), (0, 0));
+    }
+
+    // --- recherche ---
+
+    fn buf(lines: &[&str]) -> Buffer {
+        let mut b = Buffer::empty();
+        b.lines = lines.iter().map(|s| s.to_string()).collect();
+        b
+    }
+
+    #[test]
+    fn find_locates_forward_then_wraps() {
+        let b = buf(&["foo bar", "baz foo", "qux"]);
+        // Depuis le début : premier "foo" ligne 0.
+        assert_eq!(b.find_from("foo", 0, 0), Some((0, 0)));
+        // Juste après : prochain "foo" ligne 1.
+        assert_eq!(b.find_from("foo", 0, 1), Some((1, 4)));
+        // Après le dernier : boucle au premier.
+        assert_eq!(b.find_from("foo", 1, 5), Some((0, 0)));
+    }
+
+    #[test]
+    fn find_is_char_based_for_utf8() {
+        let b = buf(&["héllo wörld", "café"]);
+        assert_eq!(b.find_from("wörld", 0, 0), Some((0, 6)));
+        assert_eq!(b.find_from("café", 0, 0), Some((1, 0)));
+    }
+
+    #[test]
+    fn find_empty_or_absent_returns_none() {
+        let b = buf(&["abc"]);
+        assert_eq!(b.find_from("", 0, 0), None);
+        assert_eq!(b.find_from("zzz", 0, 0), None);
+        // Motif plus long que la ligne.
+        assert_eq!(b.find_from("abcdef", 0, 0), None);
     }
 }

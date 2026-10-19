@@ -65,6 +65,7 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
         },
         Mode::Command => "COMMANDE",
         Mode::Palette => "PALETTE",
+        Mode::Search => "RECHERCHE",
     };
     let (row, col) = app.editor().cursor_position();
     let dirty = if app.editor().dirty { " [*]" } else { "" };
@@ -417,13 +418,16 @@ fn draw_output(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_command_bar(frame: &mut Frame, area: Rect, app: &App) {
-    let active = app.mode == Mode::Command;
+    let (active, prefix, body, title) = match app.mode {
+        Mode::Command => (true, ":", app.input.clone(), " Commande "),
+        Mode::Search => (true, "/", app.search_query.clone(), " Recherche "),
+        _ => (false, " ", app.input.clone(), " Commande "),
+    };
     let cursor = if active { "▏" } else { "" };
-    let prefix = if active { ":" } else { " " };
     let content = Line::from(vec![
         Span::styled("> ", Style::default().fg(Color::Green)),
         Span::styled(prefix, Style::default().fg(Color::Yellow)),
-        Span::raw(app.input.clone()),
+        Span::raw(body),
         Span::styled(cursor, Style::default().fg(Color::Green)),
     ]);
     let border = if active {
@@ -433,7 +437,7 @@ fn draw_command_bar(frame: &mut Frame, area: Rect, app: &App) {
     };
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Commande ")
+        .title(title)
         .border_style(border);
     frame.render_widget(Paragraph::new(content).block(block), area);
 }
@@ -452,6 +456,9 @@ fn draw_hint(frame: &mut Frame, area: Rect, app: &App) {
             } else {
                 format!("suggestions: {}", names.join("  "))
             }
+        }
+        Mode::Search => {
+            "tape pour chercher · Entrée: occurrence suivante · Échap: annuler".to_string()
         }
         _ => match app.view {
             View::Git => {

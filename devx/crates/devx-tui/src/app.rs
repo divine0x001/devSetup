@@ -73,6 +73,8 @@ pub enum Mode {
     Command,
     /// Palette de commandes (`Ctrl-P`).
     Palette,
+    /// Recherche incrémentale dans l'éditeur (`Ctrl-F`).
+    Search,
 }
 
 /// Vue principale affichée par l'IDE.
@@ -174,6 +176,10 @@ pub struct App {
     pub input: String,
     /// Index sélectionné dans la palette.
     pub palette_selected: usize,
+    /// Motif de recherche courant (mode [`Mode::Search`]).
+    pub search_query: String,
+    /// Position du curseur à l'entrée en recherche (pour annuler/boucler).
+    search_origin: (usize, usize),
     /// Message de statut.
     pub status: String,
     /// Vue principale courante.
@@ -238,6 +244,8 @@ impl App {
             output,
             input: String::new(),
             palette_selected: 0,
+            search_query: String::new(),
+            search_origin: (0, 0),
             status: "prêt".to_string(),
             view: View::Code,
             git: GitState::default(),
@@ -393,6 +401,12 @@ impl App {
                     self.status = "nouveau fichier — tape le nom puis Entrée".to_string();
                     return;
                 }
+                KeyCode::Char('f') => {
+                    if self.focus == Focus::Editor {
+                        self.enter_search();
+                    }
+                    return;
+                }
                 KeyCode::Char('z') => {
                     if self.focus == Focus::Editor {
                         self.status = if self.editor_mut().undo() {
@@ -436,6 +450,7 @@ impl App {
         match self.mode {
             Mode::Command => self.on_key_command(key),
             Mode::Palette => self.on_key_palette(key),
+            Mode::Search => self.on_key_search(key),
             Mode::Normal => match key.code {
                 KeyCode::Char(':') | KeyCode::Char('/') => {
                     self.mode = Mode::Command;
@@ -664,6 +679,78 @@ impl App {
             KeyCode::Tab => self.autocomplete(),
             KeyCode::Char(c) => self.input.push(c),
             _ => {}
+        }
+    }
+
+    /// Entre en recherche incrémentale depuis l'éditeur (Ctrl-F).
+    fn enter_search(&mut self) {
+        let ed = self.editor();
+        self.search_origin = (ed.cursor_row, ed.cursor_col);
+        self.search_query.clear();
+        self.mode = Mode::Search;
+        self.status = "recherche — Entrée: occurrence suivante · Échap: annuler".to_string();
+    }
+
+    fn on_key_search(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                let (row, col) = self.search_origin;
+                let ed = self.editor_mut();
+                ed.cursor_row = row;
+                ed.cursor_col = col;
+                self.mode = Mode::Normal;
+                self.search_query.clear();
+                self.status = "recherche annulée".to_string();
+            }
+            KeyCode::Enter => {
+                if self.search_query.is_empty() {
+                    self.mode = Mode::Normal;
+                } else {
+                    self.search_next();
+                }
+            }
+            KeyCode::Backspace => {
+                self.search_query.pop();
+                self.search_from_origin();
+            }
+            KeyCode::Char(c) => {
+                self.search_query.push(c);
+                self.search_from_origin();
+            }
+            _ => {}
+        }
+    }
+
+    /// Recherche depuis la position d'origine (saisie incrémentale).
+    fn search_from_origin(&mut self) {
+        let (row, col) = self.search_origin;
+        self.apply_search(row, col);
+    }
+
+    /// Recherche à partir du caractère suivant le curseur (occurrence suivante).
+    fn search_next(&mut self) {
+        let ed = self.editor();
+        let (row, col) = (ed.cursor_row, ed.cursor_col + 1);
+        self.apply_search(row, col);
+    }
+
+    /// Déplace le curseur sur la prochaine occurrence du motif et met à jour le
+    /// statut (position trouvée, ou « introuvable »).
+    fn apply_search(&mut self, row: usize, col: usize) {
+        if self.search_query.is_empty() {
+            self.status = "recherche : ".to_string();
+            return;
+        }
+        match self.editor().find_from(&self.search_query, row, col) {
+            Some((r, c)) => {
+                let ed = self.editor_mut();
+                ed.cursor_row = r;
+                ed.cursor_col = c;
+                self.status = format!("/{}  →  {}:{}", self.search_query, r + 1, c + 1);
+            }
+            None => {
+                self.status = format!("/{}  introuvable", self.search_query);
+            }
         }
     }
 
@@ -1509,6 +1596,67 @@ mod tests {
         // Hors focus éditeur, Ctrl-Z ne touche ni le tampon ni le statut undo.
         assert_eq!(app.editor().lines[0], "intact");
         assert_ne!(app.status, "annulé");
+    }
+
+    // --- recherche ---
+
+    fn type_in_search(app: &mut App, text: &str) {
+        for c in text.chars() {
+            app.on_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+    }
+
+    #[test]
+    fn ctrl_f_searches_incrementally_and_jumps() {
+        let mut app = app();
+        app.focus = Focus::Editor;
+        app.editor_mut().lines = vec!["alpha".to_string(), "beta gamma".to_string()];
+        app.on_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+        assert_eq!(app.mode, Mode::Search);
+        type_in_search(&mut app, "gamma");
+        // Le curseur a sauté sur la 1re occurrence.
+        assert_eq!((app.editor().cursor_row, app.editor().cursor_col), (1, 5));
+    }
+
+    #[test]
+    fn search_enter_jumps_to_next_occurrence() {
+        let mut app = app();
+        app.focus = Focus::Editor;
+        app.editor_mut().lines = vec!["x x x".to_string()];
+        app.on_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+        type_in_search(&mut app, "x");
+        assert_eq!(app.editor().cursor_col, 0);
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.editor().cursor_col, 2);
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.editor().cursor_col, 4);
+        // Boucle au premier.
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.editor().cursor_col, 0);
+    }
+
+    #[test]
+    fn search_escape_restores_origin_cursor() {
+        let mut app = app();
+        app.focus = Focus::Editor;
+        app.editor_mut().lines = vec!["abc def".to_string()];
+        app.editor_mut().cursor_col = 2; // origine
+        app.on_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+        type_in_search(&mut app, "def");
+        assert_eq!(app.editor().cursor_col, 4); // a sauté sur "def"
+        app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(app.mode, Mode::Normal);
+        assert_eq!(app.editor().cursor_col, 2); // curseur restauré
+    }
+
+    #[test]
+    fn search_absent_pattern_reports_not_found() {
+        let mut app = app();
+        app.focus = Focus::Editor;
+        app.editor_mut().lines = vec!["hello".to_string()];
+        app.on_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+        type_in_search(&mut app, "zzz");
+        assert!(app.status.contains("introuvable"));
     }
 
     #[test]
