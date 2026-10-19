@@ -50,12 +50,16 @@ pub struct Buffer {
     redo: Vec<Snapshot>,
     /// Nature de la dernière édition, pour le regroupement.
     last_edit: EditKind,
+    /// Contenu de référence sur disque (dernier chargement/sauvegarde) : sert
+    /// à calculer `dirty` exactement, y compris après annulation.
+    clean: Vec<String>,
 }
 
 impl Buffer {
     /// Construit un tampon neuf (historique vide, curseur en tête).
     fn fresh(lines: Vec<String>, path: Option<PathBuf>) -> Self {
         Self {
+            clean: lines.clone(),
             lines,
             cursor_row: 0,
             cursor_col: 0,
@@ -65,6 +69,11 @@ impl Buffer {
             redo: Vec::new(),
             last_edit: EditKind::Other,
         }
+    }
+
+    /// Recalcule `dirty` : vrai si le contenu diffère de la référence disque.
+    fn mark_dirty(&mut self) {
+        self.dirty = self.lines != self.clean;
     }
 
     /// Tampon vide, sans fichier associé.
@@ -100,6 +109,7 @@ impl Buffer {
         content.push('\n');
         fs::write(path, content)
             .map_err(|err| DevxError::io(format!("écriture de {}: {err}", path.display())))?;
+        self.clean = self.lines.clone();
         self.dirty = false;
         // La prochaine édition ouvre une nouvelle étape d'annulation.
         self.last_edit = EditKind::Other;
@@ -144,7 +154,7 @@ impl Buffer {
         self.redo.push(self.snapshot());
         self.restore(prev);
         self.last_edit = EditKind::Other;
-        self.dirty = true;
+        self.mark_dirty();
         true
     }
 
@@ -156,7 +166,7 @@ impl Buffer {
         self.undo.push(self.snapshot());
         self.restore(next);
         self.last_edit = EditKind::Other;
-        self.dirty = true;
+        self.mark_dirty();
         true
     }
 
@@ -183,7 +193,7 @@ impl Buffer {
         chars.insert(self.cursor_col, c);
         *line = chars.into_iter().collect();
         self.cursor_col += 1;
-        self.dirty = true;
+        self.mark_dirty();
     }
 
     /// Coupe la ligne courante à la colonne du curseur et insère une nouvelle
@@ -194,7 +204,7 @@ impl Buffer {
         self.lines.insert(self.cursor_row + 1, right);
         self.cursor_row += 1;
         self.cursor_col = 0;
-        self.dirty = true;
+        self.mark_dirty();
     }
 
     /// Efface le caractère précédant le curseur ; en début de ligne, fusionne
@@ -207,7 +217,7 @@ impl Buffer {
             chars.remove(self.cursor_col - 1);
             *line = chars.into_iter().collect();
             self.cursor_col -= 1;
-            self.dirty = true;
+            self.mark_dirty();
         } else if self.cursor_row > 0 {
             self.record(EditKind::Delete);
             let current = self.lines.remove(self.cursor_row);
@@ -215,7 +225,7 @@ impl Buffer {
             let merged = format!("{}{}", self.lines[self.cursor_row], current);
             self.lines[self.cursor_row] = merged;
             self.cursor_col = self.line_len(self.cursor_row);
-            self.dirty = true;
+            self.mark_dirty();
         }
     }
 
@@ -229,12 +239,12 @@ impl Buffer {
             let mut chars: Vec<char> = line.chars().collect();
             chars.remove(self.cursor_col);
             *line = chars.into_iter().collect();
-            self.dirty = true;
+            self.mark_dirty();
         } else if self.cursor_row + 1 < self.lines.len() {
             self.record(EditKind::Delete);
             let next = self.lines.remove(self.cursor_row + 1);
             self.lines[self.cursor_row].push_str(&next);
-            self.dirty = true;
+            self.mark_dirty();
         }
     }
 
@@ -361,7 +371,7 @@ impl Buffer {
         }
         *line = chars.into_iter().collect();
         self.cursor_col += width;
-        self.dirty = true;
+        self.mark_dirty();
     }
 
     /// Supprime jusqu'à `width` espaces immédiatement avant le curseur
@@ -386,7 +396,7 @@ impl Buffer {
         chars.drain(self.cursor_col - n..self.cursor_col);
         *line = chars.into_iter().collect();
         self.cursor_col -= n;
-        self.dirty = true;
+        self.mark_dirty();
     }
 
     /// Place le curseur en fin de ligne.
@@ -740,6 +750,23 @@ mod tests {
         assert!(!b.undo());
         assert!(!b.redo());
         assert_eq!(b.lines, vec![String::new()]);
+    }
+
+    #[test]
+    fn undoing_to_saved_state_clears_dirty() {
+        let mut b = Buffer::empty();
+        for c in "abc".chars() {
+            b.insert_char(c);
+        }
+        assert!(b.dirty);
+        b.undo(); // revient au tampon vide (== état disque initial)
+        assert!(
+            !b.dirty,
+            "revenir au contenu de référence doit remettre dirty à faux"
+        );
+        // Rétablir re-salit.
+        b.redo();
+        assert!(b.dirty);
     }
 
     #[test]
