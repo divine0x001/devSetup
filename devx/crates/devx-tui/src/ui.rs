@@ -277,6 +277,7 @@ fn draw_editor(frame: &mut Frame, area: Rect, app: &mut App) {
     } else {
         None
     };
+    let selection = app.editor().selection_range();
     let contents = if inner_h == 0 {
         Vec::new()
     } else {
@@ -289,6 +290,7 @@ fn draw_editor(frame: &mut Frame, area: Rect, app: &mut App) {
             text_w,
             inner_h,
             search,
+            selection,
         )
     };
 
@@ -409,6 +411,7 @@ fn build_editor_lines(
     text_w: usize,
     inner_h: usize,
     search: Option<&str>,
+    selection: Option<((usize, usize), (usize, usize))>,
 ) -> Vec<Line<'static>> {
     let lines = &editor.lines;
     let match_width = search.map(|q| q.chars().count()).unwrap_or(0);
@@ -421,6 +424,13 @@ fn build_editor_lines(
             None => Vec::new(),
         };
         let in_match = |i: usize| matches.iter().any(|&s| i >= s && i < s + match_width);
+        // Cellule (idx, i) comprise dans la sélection [début, fin[.
+        let in_selection = |i: usize| match selection {
+            Some(((sr, sc), (er, ec))) => {
+                (idx > sr || (idx == sr && i >= sc)) && (idx < er || (idx == er && i < ec))
+            }
+            None => false,
+        };
         let gutter = Span::styled(
             format!("{:>3} │ ", idx + 1),
             Style::default().fg(Color::DarkGray),
@@ -445,6 +455,11 @@ fn build_editor_lines(
                         .bg(Color::Blue)
                         .fg(Color::White)
                         .add_modifier(Modifier::BOLD),
+                ));
+            } else if in_selection(i) {
+                spans.push(Span::styled(
+                    owned,
+                    Style::default().bg(Color::Blue).fg(Color::White),
                 ));
             } else {
                 spans.push(Span::raw(owned));

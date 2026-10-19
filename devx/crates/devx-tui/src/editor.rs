@@ -53,6 +53,9 @@ pub struct Buffer {
     /// Contenu de référence sur disque (dernier chargement/sauvegarde) : sert
     /// à calculer `dirty` exactement, y compris après annulation.
     clean: Vec<String>,
+    /// Ancre de sélection (position fixe) ; la sélection court jusqu'au
+    /// curseur. `None` : aucune sélection active.
+    selection_anchor: Option<(usize, usize)>,
 }
 
 impl Buffer {
@@ -68,12 +71,103 @@ impl Buffer {
             undo: Vec::new(),
             redo: Vec::new(),
             last_edit: EditKind::Other,
+            selection_anchor: None,
         }
     }
 
     /// Recalcule `dirty` : vrai si le contenu diffère de la référence disque.
     fn mark_dirty(&mut self) {
         self.dirty = self.lines != self.clean;
+    }
+
+    /// Démarre une sélection à la position du curseur si aucune n'est active
+    /// (appelé avant un déplacement avec Maj).
+    pub fn anchor_selection(&mut self) {
+        if self.selection_anchor.is_none() {
+            self.selection_anchor = Some((self.cursor_row, self.cursor_col));
+        }
+    }
+
+    /// Annule la sélection courante.
+    pub fn clear_selection(&mut self) {
+        self.selection_anchor = None;
+    }
+
+    /// Bornes normalisées `(début, fin)` de la sélection, ou `None` si vide.
+    pub fn selection_range(&self) -> Option<((usize, usize), (usize, usize))> {
+        let anchor = self.selection_anchor?;
+        let cursor = (self.cursor_row, self.cursor_col);
+        if anchor == cursor {
+            return None;
+        }
+        Some(if anchor <= cursor {
+            (anchor, cursor)
+        } else {
+            (cursor, anchor)
+        })
+    }
+
+    /// Texte sélectionné (lignes jointes par `\n`), ou `None` si vide.
+    pub fn selected_text(&self) -> Option<String> {
+        let ((sr, sc), (er, ec)) = self.selection_range()?;
+        if sr == er {
+            let chars: Vec<char> = self.lines[sr].chars().collect();
+            return Some(chars[sc..ec].iter().collect());
+        }
+        let mut out = String::new();
+        let first: Vec<char> = self.lines[sr].chars().collect();
+        out.extend(&first[sc..]);
+        for row in &self.lines[sr + 1..er] {
+            out.push('\n');
+            out.push_str(row);
+        }
+        out.push('\n');
+        let last: Vec<char> = self.lines[er].chars().collect();
+        out.extend(&last[..ec]);
+        Some(out)
+    }
+
+    /// Supprime la sélection si elle existe ; place le curseur à son début.
+    /// Renvoie `true` si une sélection a été supprimée.
+    pub fn delete_selection(&mut self) -> bool {
+        let Some(((sr, sc), (er, ec))) = self.selection_range() else {
+            return false;
+        };
+        self.record(EditKind::Other);
+        let left: String = self.lines[sr].chars().take(sc).collect();
+        let right: String = self.lines[er].chars().skip(ec).collect();
+        let merged = format!("{left}{right}");
+        self.lines.splice(sr..=er, std::iter::once(merged));
+        self.cursor_row = sr;
+        self.cursor_col = sc;
+        self.selection_anchor = None;
+        self.mark_dirty();
+        true
+    }
+
+    /// Insère `text` (éventuellement multi-ligne) à la position du curseur, qui
+    /// se place après le texte inséré. Annule d'abord toute sélection active.
+    pub fn insert_str(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        self.delete_selection();
+        self.record(EditKind::Other);
+        let right = self.split_at_cursor();
+        let segments: Vec<&str> = text.split('\n').collect();
+        // Première ligne : collée à la suite du curseur.
+        self.lines[self.cursor_row].push_str(segments[0]);
+        self.cursor_col = self.line_len(self.cursor_row);
+        // Lignes suivantes insérées en dessous.
+        for seg in &segments[1..] {
+            self.cursor_row += 1;
+            self.lines.insert(self.cursor_row, (*seg).to_string());
+            self.cursor_col = self.line_len(self.cursor_row);
+        }
+        // Ré-accole la partie droite coupée au départ.
+        let row = self.cursor_row;
+        self.lines[row].push_str(&right);
+        self.mark_dirty();
     }
 
     /// Tampon vide, sans fichier associé.
@@ -1067,6 +1161,70 @@ mod tests {
         assert_eq!((b.cursor_row, b.cursor_col), (4, 3));
         b.move_doc_start();
         assert_eq!((b.cursor_row, b.cursor_col), (0, 0));
+    }
+
+    // --- sélection ---
+
+    #[test]
+    fn selection_range_normalizes_direction() {
+        let mut b = buf(&["hello"]);
+        b.cursor_col = 1;
+        b.anchor_selection(); // ancre en (0,1)
+        b.cursor_col = 4; // curseur en (0,4)
+        assert_eq!(b.selection_range(), Some(((0, 1), (0, 4))));
+        assert_eq!(b.selected_text().as_deref(), Some("ell"));
+        // Direction inverse : mêmes bornes normalisées.
+        b.cursor_col = 1;
+        b.selection_anchor = Some((0, 4));
+        assert_eq!(b.selection_range(), Some(((0, 1), (0, 4))));
+    }
+
+    #[test]
+    fn selected_text_spans_multiple_lines() {
+        let mut b = buf(&["abc", "def", "ghi"]);
+        b.cursor_row = 0;
+        b.cursor_col = 1;
+        b.anchor_selection();
+        b.cursor_row = 2;
+        b.cursor_col = 2;
+        assert_eq!(b.selected_text().as_deref(), Some("bc\ndef\ngh"));
+    }
+
+    #[test]
+    fn delete_selection_removes_span_and_merges() {
+        let mut b = buf(&["abc", "def", "ghi"]);
+        b.cursor_row = 0;
+        b.cursor_col = 1;
+        b.anchor_selection();
+        b.cursor_row = 2;
+        b.cursor_col = 2;
+        assert!(b.delete_selection());
+        assert_eq!(b.lines, vec!["ai"]);
+        assert_eq!((b.cursor_row, b.cursor_col), (0, 1));
+        assert!(b.selection_range().is_none());
+        // Annulable.
+        b.undo();
+        assert_eq!(b.lines, vec!["abc", "def", "ghi"]);
+    }
+
+    #[test]
+    fn insert_str_pastes_multiline_text() {
+        let mut b = buf(&["axz"]);
+        b.cursor_col = 1; // entre 'a' et 'x'
+        b.insert_str("B\nC");
+        assert_eq!(b.lines, vec!["aB", "Cxz"]);
+        assert_eq!((b.cursor_row, b.cursor_col), (1, 1));
+    }
+
+    #[test]
+    fn insert_str_replaces_active_selection() {
+        let mut b = buf(&["hello"]);
+        b.cursor_col = 1;
+        b.anchor_selection();
+        b.cursor_col = 4; // "ell" sélectionné
+        b.insert_str("X");
+        assert_eq!(b.lines, vec!["hXo"]);
+        assert!(b.selection_range().is_none());
     }
 
     // --- recherche ---

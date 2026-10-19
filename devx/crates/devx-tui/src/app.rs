@@ -568,6 +568,7 @@ impl App {
         let line_len = self.editor().lines[row].chars().count();
         let col = (col_vis + self.layout.editor_x_offset).min(line_len);
         let tab = self.editor_mut();
+        tab.clear_selection();
         tab.cursor_row = row;
         tab.cursor_col = col;
         self.focus = Focus::Editor;
@@ -634,35 +635,89 @@ impl App {
             .max(1)
     }
 
+    /// Prépare la sélection avant un déplacement : l'étend avec Maj (pose une
+    /// ancre au besoin), sinon l'annule.
+    fn prepare_selection(&mut self, shift: bool) {
+        let ed = self.editor_mut();
+        if shift {
+            ed.anchor_selection();
+        } else {
+            ed.clear_selection();
+        }
+    }
+
     fn on_key_editor(&mut self, key: KeyEvent) {
         let alt = key.modifiers.contains(KeyModifiers::ALT);
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         match key.code {
+            // Alt + flèches : opérations sur les mots / lignes (pas de sélection).
             KeyCode::Left if alt => self.editor_mut().move_word_left(),
             KeyCode::Right if alt => self.editor_mut().move_word_right(),
             KeyCode::Up if alt => self.editor_mut().move_line_up(),
             KeyCode::Down if alt => self.editor_mut().move_line_down(),
-            KeyCode::Up => self.editor_mut().move_up(),
-            KeyCode::Down => self.editor_mut().move_down(),
-            KeyCode::Left => self.editor_mut().move_left(),
-            KeyCode::Right => self.editor_mut().move_right(),
-            KeyCode::Home => self.editor_mut().move_home(),
-            KeyCode::End => self.editor_mut().move_end(),
+            // Déplacements du curseur : Maj étend la sélection.
+            KeyCode::Up => {
+                self.prepare_selection(shift);
+                self.editor_mut().move_up();
+            }
+            KeyCode::Down => {
+                self.prepare_selection(shift);
+                self.editor_mut().move_down();
+            }
+            KeyCode::Left => {
+                self.prepare_selection(shift);
+                self.editor_mut().move_left();
+            }
+            KeyCode::Right => {
+                self.prepare_selection(shift);
+                self.editor_mut().move_right();
+            }
+            KeyCode::Home => {
+                self.prepare_selection(shift);
+                self.editor_mut().move_home();
+            }
+            KeyCode::End => {
+                self.prepare_selection(shift);
+                self.editor_mut().move_end();
+            }
             KeyCode::PageUp => {
+                self.prepare_selection(shift);
                 let page = self.editor_page();
                 self.editor_mut().page_up(page);
             }
             KeyCode::PageDown => {
+                self.prepare_selection(shift);
                 let page = self.editor_page();
                 self.editor_mut().page_down(page);
             }
-            KeyCode::Backspace => self.editor_mut().backspace(),
-            KeyCode::Delete => self.editor_mut().delete(),
-            KeyCode::Enter => self.editor_mut().insert_newline(),
-            KeyCode::Esc => {
-                self.focus = Focus::Tree;
-                self.status = "focus: arbre de fichiers".to_string();
+            // Édition : une sélection active est d'abord supprimée.
+            KeyCode::Backspace => {
+                if !self.editor_mut().delete_selection() {
+                    self.editor_mut().backspace();
+                }
             }
-            KeyCode::Char(c) => self.editor_mut().insert_char(c),
+            KeyCode::Delete => {
+                if !self.editor_mut().delete_selection() {
+                    self.editor_mut().delete();
+                }
+            }
+            KeyCode::Enter => {
+                self.editor_mut().delete_selection();
+                self.editor_mut().insert_newline();
+            }
+            KeyCode::Esc => {
+                if self.editor().selection_range().is_some() {
+                    self.editor_mut().clear_selection();
+                    self.status = "sélection annulée".to_string();
+                } else {
+                    self.focus = Focus::Tree;
+                    self.status = "focus: arbre de fichiers".to_string();
+                }
+            }
+            KeyCode::Char(c) => {
+                self.editor_mut().delete_selection();
+                self.editor_mut().insert_char(c);
+            }
             _ => {}
         }
     }
@@ -1672,6 +1727,49 @@ mod tests {
         app.on_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
         type_in_search(&mut app, "zzz");
         assert!(app.status.contains("introuvable"));
+    }
+
+    // --- sélection ---
+
+    #[test]
+    fn shift_right_extends_selection() {
+        let mut app = app();
+        app.focus = Focus::Editor;
+        app.editor_mut().lines = vec!["hello".to_string()];
+        app.on_key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT));
+        app.on_key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT));
+        assert_eq!(app.editor().selection_range(), Some(((0, 0), (0, 2))));
+        // Un déplacement sans Maj annule la sélection.
+        app.on_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        assert!(app.editor().selection_range().is_none());
+    }
+
+    #[test]
+    fn typing_replaces_the_selection() {
+        let mut app = app();
+        app.focus = Focus::Editor;
+        app.editor_mut().lines = vec!["hello".to_string()];
+        // Sélectionne "he".
+        app.on_key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT));
+        app.on_key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT));
+        app.on_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::NONE));
+        assert_eq!(app.editor().lines[0], "Xllo");
+        assert!(app.editor().selection_range().is_none());
+    }
+
+    #[test]
+    fn esc_clears_selection_before_leaving_editor() {
+        let mut app = app();
+        app.focus = Focus::Editor;
+        app.editor_mut().lines = vec!["hello".to_string()];
+        app.on_key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT));
+        app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        // 1er Échap : annule la sélection, garde le focus éditeur.
+        assert!(app.editor().selection_range().is_none());
+        assert_eq!(app.focus, Focus::Editor);
+        // 2e Échap : rend le focus à l'arbre.
+        app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(app.focus, Focus::Tree);
     }
 
     // --- opérations par mot ---
