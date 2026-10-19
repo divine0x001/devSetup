@@ -519,10 +519,28 @@ impl App {
         }
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => self.on_left_click(mouse.column, mouse.row),
+            MouseEventKind::Drag(MouseButton::Left) => self.on_left_drag(mouse.column, mouse.row),
             MouseEventKind::ScrollUp => self.on_scroll(mouse.column, mouse.row, -1),
             MouseEventKind::ScrollDown => self.on_scroll(mouse.column, mouse.row, 1),
             _ => {}
         }
+    }
+
+    /// Glisser avec le bouton gauche dans l'éditeur : étend la sélection
+    /// jusqu'au caractère survolé (pose une ancre au premier mouvement).
+    fn on_left_drag(&mut self, x: u16, y: u16) {
+        if !inside(self.layout.editor, x, y) {
+            return;
+        }
+        let Some((row, col)) = self.editor_coords(x, y) else {
+            return;
+        };
+        let tab = self.editor_mut();
+        tab.anchor_selection();
+        tab.cursor_row = row;
+        tab.cursor_col = col;
+        self.focus = Focus::Editor;
+        self.status = format!("sélection → {}:{}", row + 1, col + 1);
     }
 
     fn on_left_click(&mut self, x: u16, y: u16) {
@@ -584,21 +602,30 @@ impl App {
         self.open_selected();
     }
 
-    /// Place le curseur de l'éditeur sur le caractère cliqué.
-    fn on_editor_click(&mut self, x: u16, y: u16) {
+    /// Convertit des coordonnées écran en position `(row, col)` dans l'éditeur,
+    /// bornée au texte. `None` si le clic est au-dessus de la première ligne.
+    fn editor_coords(&self, x: u16, y: u16) -> Option<(usize, usize)> {
         let area = self.layout.editor;
         let origin_x = area.x as i32 + 1 + EDITOR_GUTTER as i32;
         let origin_y = area.y as i32 + 1;
         let rel_x = x as i32 - origin_x;
         let rel_y = y as i32 - origin_y;
         if rel_y < 0 {
-            return;
+            return None;
         }
         let last_row = self.editor().lines.len().saturating_sub(1);
         let row = ((rel_y as usize) + self.layout.editor_y_offset).min(last_row);
         let col_vis = if rel_x < 0 { 0 } else { rel_x as usize };
         let line_len = self.editor().lines[row].chars().count();
         let col = (col_vis + self.layout.editor_x_offset).min(line_len);
+        Some((row, col))
+    }
+
+    /// Place le curseur de l'éditeur sur le caractère cliqué (sans sélection).
+    fn on_editor_click(&mut self, x: u16, y: u16) {
+        let Some((row, col)) = self.editor_coords(x, y) else {
+            return;
+        };
         let tab = self.editor_mut();
         tab.clear_selection();
         tab.cursor_row = row;
@@ -1822,6 +1849,32 @@ mod tests {
         app.on_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
         app.on_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL));
         assert_eq!(app.editor().lines[0], "llohe");
+    }
+
+    #[test]
+    fn mouse_drag_extends_selection() {
+        let mut app = app();
+        app.editor_mut().lines = vec!["hello world".to_string()];
+        app.layout.editor = Rect::new(0, 0, 40, 10);
+        app.layout.editor_y_offset = 0;
+        app.layout.editor_x_offset = 0;
+        // Clic initial en colonne 0 (origine texte = 1 + gouttière).
+        let text_x = 1 + EDITOR_GUTTER as u16;
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: text_x,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.editor().cursor_col, 0);
+        // Glisse jusqu'à la colonne 5 : sélection (0,0)..(0,5).
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column: text_x + 5,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.editor().selection_range(), Some(((0, 0), (0, 5))));
     }
 
     #[test]
