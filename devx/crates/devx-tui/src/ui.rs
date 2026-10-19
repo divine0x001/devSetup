@@ -68,6 +68,7 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
         Mode::Search => "RECHERCHE",
     };
     let (row, col) = app.editor().cursor_position();
+    let total = app.editor().lines.len();
     let dirty = if app.editor().dirty { " [*]" } else { "" };
     let path = app
         .editor()
@@ -75,7 +76,12 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
         .as_deref()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "—".to_string());
-    let specs_count = app.specs.len();
+    // Indicateur d'onglet affiché seulement s'il y en a plusieurs.
+    let tabs = if app.tab_count() > 1 {
+        format!("  · onglet {}/{}", app.active + 1, app.tab_count())
+    } else {
+        String::new()
+    };
 
     let line = Line::from(vec![
         Span::styled(" devx ", Style::default().fg(Color::Black).bg(Color::Cyan)),
@@ -86,11 +92,11 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(format!(" {path}{dirty}")),
-        Span::styled(format!("  {row}:{col}"), Style::default().fg(Color::Gray)),
         Span::styled(
-            format!("  · {specs_count} commandes"),
+            format!("  {row}:{col}/{total}"),
             Style::default().fg(Color::Gray),
         ),
+        Span::styled(tabs, Style::default().fg(Color::Gray)),
     ]);
     frame.render_widget(
         Paragraph::new(line).style(Style::default().bg(Color::DarkGray)),
@@ -622,8 +628,8 @@ mod tests {
             "barre de statut manquante:\n{screen}"
         );
         assert!(
-            screen.contains("commandes"),
-            "compteur de commandes manquant:\n{screen}"
+            screen.contains("1:1/1"),
+            "indicateur de position manquant:\n{screen}"
         );
     }
 
