@@ -286,9 +286,18 @@ impl Buffer {
         }
     }
 
-    /// Place le curseur en début de ligne.
+    /// Home « intelligent » : place le curseur au premier caractère non blanc
+    /// de la ligne ; s'il y est déjà, revient en colonne 0.
     pub fn move_home(&mut self) {
-        self.cursor_col = 0;
+        let first_non_ws = self.lines[self.cursor_row]
+            .chars()
+            .position(|c| !c.is_whitespace())
+            .unwrap_or(0);
+        self.cursor_col = if self.cursor_col == first_non_ws {
+            0
+        } else {
+            first_non_ws
+        };
     }
 
     /// Remonte le curseur de `n` lignes (au moins une), borné au début.
@@ -634,6 +643,21 @@ mod tests {
         assert_eq!(b.cursor_col, 0);
         b.move_end();
         assert_eq!(b.cursor_col, 3);
+    }
+
+    #[test]
+    fn smart_home_toggles_between_indent_and_column_zero() {
+        let mut b = Buffer::empty();
+        for c in "    code".chars() {
+            b.insert_char(c);
+        }
+        b.move_end(); // col 8
+        b.move_home(); // → premier non-blanc (col 4)
+        assert_eq!(b.cursor_col, 4);
+        b.move_home(); // déjà au non-blanc → col 0
+        assert_eq!(b.cursor_col, 0);
+        b.move_home(); // col 0 != premier non-blanc → revient au non-blanc
+        assert_eq!(b.cursor_col, 4);
     }
 
     #[test]
