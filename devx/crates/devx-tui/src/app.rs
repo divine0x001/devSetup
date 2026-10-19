@@ -393,6 +393,26 @@ impl App {
                     self.status = "nouveau fichier — tape le nom puis Entrée".to_string();
                     return;
                 }
+                KeyCode::Char('z') => {
+                    if self.focus == Focus::Editor {
+                        self.status = if self.editor_mut().undo() {
+                            "annulé".to_string()
+                        } else {
+                            "rien à annuler".to_string()
+                        };
+                    }
+                    return;
+                }
+                KeyCode::Char('y') => {
+                    if self.focus == Focus::Editor {
+                        self.status = if self.editor_mut().redo() {
+                            "rétabli".to_string()
+                        } else {
+                            "rien à rétablir".to_string()
+                        };
+                    }
+                    return;
+                }
                 KeyCode::Left => {
                     self.switch_tab(-1);
                     return;
@@ -1441,6 +1461,31 @@ mod tests {
         assert_eq!(app.editor().cursor_col, 16);
         // Le focus n'a pas changé.
         assert_eq!(app.focus, Focus::Editor);
+    }
+
+    #[test]
+    fn ctrl_z_undoes_and_ctrl_y_redoes_in_editor() {
+        let mut app = app();
+        app.focus = Focus::Editor;
+        for c in "hey".chars() {
+            app.on_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        assert_eq!(app.editor().lines[0], "hey");
+        app.on_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL));
+        assert_eq!(app.editor().lines[0], "");
+        app.on_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL));
+        assert_eq!(app.editor().lines[0], "hey");
+    }
+
+    #[test]
+    fn ctrl_z_is_inert_when_tree_focused() {
+        let mut app = app();
+        app.focus = Focus::Tree;
+        app.editor_mut().lines[0].push_str("intact");
+        app.on_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL));
+        // Hors focus éditeur, Ctrl-Z ne touche ni le tampon ni le statut undo.
+        assert_eq!(app.editor().lines[0], "intact");
+        assert_ne!(app.status, "annulé");
     }
 
     #[test]

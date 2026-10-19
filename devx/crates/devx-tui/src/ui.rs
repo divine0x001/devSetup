@@ -464,7 +464,7 @@ fn draw_hint(frame: &mut Frame, area: Rect, app: &App) {
                         .to_string()
                 }
                 Focus::Editor => {
-                    "clic: placer le curseur · flèches: déplacer · Ctrl-S: sauver · Ctrl-←/→: onglets · Tab: arbre · : : commande"
+                    "clic: curseur · Ctrl-S: sauver · Ctrl-Z/Y: annuler/rétablir · Ctrl-←/→: onglets · Tab: arbre · : : commande"
                         .to_string()
                 }
             },

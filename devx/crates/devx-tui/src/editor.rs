@@ -5,6 +5,29 @@ use std::path::{Path, PathBuf};
 
 use devx_core::DevxError;
 
+/// Profondeur maximale de l'historique d'annulation (borne la mémoire).
+const UNDO_DEPTH: usize = 200;
+
+/// Type de la dernière édition, pour regrouper (« coalescer ») des frappes
+/// successives de même nature en une seule étape d'annulation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditKind {
+    /// Insertion de texte au fil de la frappe.
+    Insert,
+    /// Suppression de caractères (Backspace/Delete).
+    Delete,
+    /// Édition structurelle : rompt toujours le regroupement.
+    Other,
+}
+
+/// Instantané de l'état éditable, empilé pour annuler/rétablir.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Snapshot {
+    lines: Vec<String>,
+    cursor_row: usize,
+    cursor_col: usize,
+}
+
 /// Tampon éditable.
 ///
 /// Les colonnes du curseur sont des indices **de caractères** (`char`), jamais
@@ -21,29 +44,37 @@ pub struct Buffer {
     pub path: Option<PathBuf>,
     /// Vrai si le tampon diffère de l'état sur disque.
     pub dirty: bool,
+    /// Pile d'annulation (états antérieurs).
+    undo: Vec<Snapshot>,
+    /// Pile de rétablissement (états annulés).
+    redo: Vec<Snapshot>,
+    /// Nature de la dernière édition, pour le regroupement.
+    last_edit: EditKind,
 }
 
 impl Buffer {
-    /// Tampon vide, sans fichier associé.
-    pub fn empty() -> Self {
+    /// Construit un tampon neuf (historique vide, curseur en tête).
+    fn fresh(lines: Vec<String>, path: Option<PathBuf>) -> Self {
         Self {
-            lines: vec![String::new()],
+            lines,
             cursor_row: 0,
             cursor_col: 0,
-            path: None,
+            path,
             dirty: false,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            last_edit: EditKind::Other,
         }
+    }
+
+    /// Tampon vide, sans fichier associé.
+    pub fn empty() -> Self {
+        Self::fresh(vec![String::new()], None)
     }
 
     /// Tampon vide associé à un chemin (pour créer un nouveau fichier).
     pub fn empty_with_path(path: impl Into<PathBuf>) -> Self {
-        Self {
-            lines: vec![String::new()],
-            cursor_row: 0,
-            cursor_col: 0,
-            path: Some(path.into()),
-            dirty: false,
-        }
+        Self::fresh(vec![String::new()], Some(path.into()))
     }
 
     /// Charge un fichier dans un nouveau tampon.
@@ -55,13 +86,7 @@ impl Buffer {
         if lines.is_empty() {
             lines.push(String::new());
         }
-        Ok(Self {
-            lines,
-            cursor_row: 0,
-            cursor_col: 0,
-            path: Some(path),
-            dirty: false,
-        })
+        Ok(Self::fresh(lines, Some(path)))
     }
 
     /// Sauvegarde le tampon sur disque (échec si aucun fichier associé).
@@ -76,7 +101,63 @@ impl Buffer {
         fs::write(path, content)
             .map_err(|err| DevxError::io(format!("écriture de {}: {err}", path.display())))?;
         self.dirty = false;
+        // La prochaine édition ouvre une nouvelle étape d'annulation.
+        self.last_edit = EditKind::Other;
         Ok(())
+    }
+
+    /// Enregistre l'état courant avant une édition de type `kind`, et vide la
+    /// pile de rétablissement. Les éditions consécutives de même type (hors
+    /// [`EditKind::Other`]) sont regroupées en une seule étape d'annulation.
+    fn record(&mut self, kind: EditKind) {
+        self.redo.clear();
+        let coalesce = kind != EditKind::Other && kind == self.last_edit;
+        self.last_edit = kind;
+        if coalesce {
+            return;
+        }
+        self.undo.push(self.snapshot());
+        if self.undo.len() > UNDO_DEPTH {
+            self.undo.remove(0);
+        }
+    }
+
+    fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            lines: self.lines.clone(),
+            cursor_row: self.cursor_row,
+            cursor_col: self.cursor_col,
+        }
+    }
+
+    fn restore(&mut self, snap: Snapshot) {
+        self.lines = snap.lines;
+        self.cursor_row = snap.cursor_row;
+        self.cursor_col = snap.cursor_col;
+    }
+
+    /// Annule la dernière édition. Renvoie `false` s'il n'y a rien à annuler.
+    pub fn undo(&mut self) -> bool {
+        let Some(prev) = self.undo.pop() else {
+            return false;
+        };
+        self.redo.push(self.snapshot());
+        self.restore(prev);
+        self.last_edit = EditKind::Other;
+        self.dirty = true;
+        true
+    }
+
+    /// Rétablit la dernière édition annulée. Renvoie `false` s'il n'y a rien.
+    pub fn redo(&mut self) -> bool {
+        let Some(next) = self.redo.pop() else {
+            return false;
+        };
+        self.undo.push(self.snapshot());
+        self.restore(next);
+        self.last_edit = EditKind::Other;
+        self.dirty = true;
+        true
     }
 
     /// Position du curseur en coordonnées affichables (ligne:colonne 1-based).
@@ -96,6 +177,7 @@ impl Buffer {
 
     /// Insère un caractère à la position du curseur.
     pub fn insert_char(&mut self, c: char) {
+        self.record(EditKind::Insert);
         let line = &mut self.lines[self.cursor_row];
         let mut chars: Vec<char> = line.chars().collect();
         chars.insert(self.cursor_col, c);
@@ -107,6 +189,7 @@ impl Buffer {
     /// Coupe la ligne courante à la colonne du curseur et insère une nouvelle
     /// ligne avec la partie droite.
     pub fn insert_newline(&mut self) {
+        self.record(EditKind::Other);
         let right = self.split_at_cursor();
         self.lines.insert(self.cursor_row + 1, right);
         self.cursor_row += 1;
@@ -118,19 +201,22 @@ impl Buffer {
     /// avec la ligne précédente.
     pub fn backspace(&mut self) {
         if self.cursor_col > 0 {
+            self.record(EditKind::Delete);
             let line = &mut self.lines[self.cursor_row];
             let mut chars: Vec<char> = line.chars().collect();
             chars.remove(self.cursor_col - 1);
             *line = chars.into_iter().collect();
             self.cursor_col -= 1;
+            self.dirty = true;
         } else if self.cursor_row > 0 {
+            self.record(EditKind::Delete);
             let current = self.lines.remove(self.cursor_row);
             self.cursor_row -= 1;
             let merged = format!("{}{}", self.lines[self.cursor_row], current);
             self.lines[self.cursor_row] = merged;
             self.cursor_col = self.line_len(self.cursor_row);
+            self.dirty = true;
         }
-        self.dirty = true;
     }
 
     /// Efface le caractère sous le curseur ; en fin de ligne, fusionne avec la
@@ -138,15 +224,18 @@ impl Buffer {
     pub fn delete(&mut self) {
         let len = self.line_len(self.cursor_row);
         if self.cursor_col < len {
+            self.record(EditKind::Delete);
             let line = &mut self.lines[self.cursor_row];
             let mut chars: Vec<char> = line.chars().collect();
             chars.remove(self.cursor_col);
             *line = chars.into_iter().collect();
+            self.dirty = true;
         } else if self.cursor_row + 1 < self.lines.len() {
+            self.record(EditKind::Delete);
             let next = self.lines.remove(self.cursor_row + 1);
             self.lines[self.cursor_row].push_str(&next);
+            self.dirty = true;
         }
-        self.dirty = true;
     }
 
     /// Déplace le curseur d'une ligne vers le haut.
@@ -197,6 +286,7 @@ impl Buffer {
         if width == 0 {
             return;
         }
+        self.record(EditKind::Insert);
         let line = &mut self.lines[self.cursor_row];
         let mut chars: Vec<char> = line.chars().collect();
         for _ in 0..width {
@@ -223,6 +313,7 @@ impl Buffer {
         if n == 0 {
             return;
         }
+        self.record(EditKind::Other);
         let line = &mut self.lines[self.cursor_row];
         let mut chars: Vec<char> = line.chars().collect();
         chars.drain(self.cursor_col - n..self.cursor_col);
@@ -483,5 +574,101 @@ mod tests {
         b.remove_tab(4);
         assert_eq!(b.lines[0], " ab");
         assert_eq!(b.cursor_col, 3);
+    }
+
+    // --- annuler / rétablir ---
+
+    #[test]
+    fn undo_coalesces_a_run_of_inserts() {
+        let mut b = Buffer::empty();
+        for c in "abc".chars() {
+            b.insert_char(c);
+        }
+        assert_eq!(b.lines[0], "abc");
+        // Un seul undo annule toute la saisie contiguë.
+        assert!(b.undo());
+        assert_eq!(b.lines[0], "");
+        assert_eq!(b.cursor_col, 0);
+        // Plus rien à annuler.
+        assert!(!b.undo());
+    }
+
+    #[test]
+    fn newline_breaks_the_undo_run() {
+        let mut b = Buffer::empty();
+        for c in "ab".chars() {
+            b.insert_char(c);
+        }
+        b.insert_newline();
+        for c in "cd".chars() {
+            b.insert_char(c);
+        }
+        assert_eq!(b.lines, vec!["ab", "cd"]);
+        // 1er undo : retire "cd".
+        b.undo();
+        assert_eq!(b.lines, vec!["ab", ""]);
+        // 2e undo : retire le saut de ligne.
+        b.undo();
+        assert_eq!(b.lines, vec!["ab"]);
+        // 3e undo : retire "ab".
+        b.undo();
+        assert_eq!(b.lines, vec![""]);
+    }
+
+    #[test]
+    fn redo_reapplies_undone_edits() {
+        let mut b = Buffer::empty();
+        for c in "hi".chars() {
+            b.insert_char(c);
+        }
+        b.undo();
+        assert_eq!(b.lines[0], "");
+        assert!(b.redo());
+        assert_eq!(b.lines[0], "hi");
+        assert_eq!(b.cursor_col, 2);
+        assert!(!b.redo());
+    }
+
+    #[test]
+    fn a_fresh_edit_clears_the_redo_stack() {
+        let mut b = Buffer::empty();
+        b.insert_char('a');
+        b.undo();
+        // Une nouvelle édition après un undo invalide le rétablissement.
+        b.insert_char('z');
+        assert!(!b.redo());
+        assert_eq!(b.lines[0], "z");
+    }
+
+    #[test]
+    fn undo_separates_insert_from_delete() {
+        let mut b = Buffer::empty();
+        for c in "abc".chars() {
+            b.insert_char(c);
+        }
+        b.backspace(); // supprime 'c'
+        assert_eq!(b.lines[0], "ab");
+        // 1er undo : rétablit la suppression.
+        b.undo();
+        assert_eq!(b.lines[0], "abc");
+        // 2e undo : annule l'insertion.
+        b.undo();
+        assert_eq!(b.lines[0], "");
+    }
+
+    #[test]
+    fn undo_on_empty_history_is_a_noop() {
+        let mut b = Buffer::empty();
+        assert!(!b.undo());
+        assert!(!b.redo());
+        assert_eq!(b.lines, vec![String::new()]);
+    }
+
+    #[test]
+    fn noop_backspace_does_not_dirty_or_record() {
+        let mut b = Buffer::empty();
+        b.backspace(); // début de tampon : aucun effet
+        assert!(!b.dirty);
+        assert!(!b.undo());
     }
 }
