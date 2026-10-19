@@ -187,7 +187,7 @@ impl App {
         let nodes = scan_dir(&ctx.workspace.root, MAX_DEPTH, &mut budget);
         let mut output = vec![
             "devx — VS Code dans le terminal".to_string(),
-            "Onglets: Ctrl-←/→ · Tab: changer de panneau · : commande · Ctrl-P: palette · q: quitter"
+            "Tab: panneau · : commande · Ctrl-P: palette · :help: toutes les commandes · q: quitter"
                 .to_string(),
         ];
 
