@@ -316,6 +316,56 @@ impl Buffer {
         self.cursor_col = self.line_len(self.cursor_row);
     }
 
+    /// Recule le curseur au début du mot précédent (saute les espaces puis le
+    /// mot). En début de ligne, passe à la fin de la ligne précédente.
+    pub fn move_word_left(&mut self) {
+        if self.cursor_col == 0 {
+            self.move_left();
+            return;
+        }
+        let chars: Vec<char> = self.lines[self.cursor_row].chars().collect();
+        self.cursor_col = word_start_before(&chars, self.cursor_col);
+    }
+
+    /// Avance le curseur au début du mot suivant (saute le mot courant puis les
+    /// espaces). En fin de ligne, passe au début de la ligne suivante.
+    pub fn move_word_right(&mut self) {
+        let chars: Vec<char> = self.lines[self.cursor_row].chars().collect();
+        if self.cursor_col >= chars.len() {
+            self.move_right();
+            return;
+        }
+        let mut i = self.cursor_col;
+        while i < chars.len() && !chars[i].is_whitespace() {
+            i += 1;
+        }
+        while i < chars.len() && chars[i].is_whitespace() {
+            i += 1;
+        }
+        self.cursor_col = i;
+    }
+
+    /// Supprime le mot précédant le curseur (Ctrl-W). En début de ligne, se
+    /// comporte comme un [`Buffer::backspace`] (fusion avec la ligne du dessus).
+    pub fn delete_word_left(&mut self) {
+        if self.cursor_col == 0 {
+            self.backspace();
+            return;
+        }
+        let chars: Vec<char> = self.lines[self.cursor_row].chars().collect();
+        let start = word_start_before(&chars, self.cursor_col);
+        if start == self.cursor_col {
+            return;
+        }
+        // Chaque Ctrl-W est une étape d'annulation distincte.
+        self.record(EditKind::Other);
+        let mut chars = chars;
+        chars.drain(start..self.cursor_col);
+        self.lines[self.cursor_row] = chars.into_iter().collect();
+        self.cursor_col = start;
+        self.mark_dirty();
+    }
+
     /// Cherche la prochaine occurrence de `query` à partir de
     /// `(from_row, from_col)` (incluse), en bouclant sur le document. Renvoie
     /// la position `(row, col)` en indices de `char`, ou `None` si `query` est
@@ -421,6 +471,19 @@ impl Buffer {
     fn clamp_col(&mut self) {
         self.cursor_col = self.cursor_col.min(self.line_len(self.cursor_row));
     }
+}
+
+/// Début du mot situé juste avant `col` dans `chars` : on recule d'abord sur
+/// les espaces, puis sur les caractères non blancs. Renvoie l'indice obtenu.
+fn word_start_before(chars: &[char], col: usize) -> usize {
+    let mut i = col.min(chars.len());
+    while i > 0 && chars[i - 1].is_whitespace() {
+        i -= 1;
+    }
+    while i > 0 && !chars[i - 1].is_whitespace() {
+        i -= 1;
+    }
+    i
 }
 
 /// Indice du premier `needle` dans `hay` (slices de `char`) à partir de
@@ -808,6 +871,61 @@ mod tests {
         b.page_down(2);
         assert_eq!(b.cursor_row, 2);
         assert_eq!(b.cursor_col, 1); // bornée à la longueur de "x"
+    }
+
+    #[test]
+    fn word_left_and_right_hop_over_words() {
+        let mut b = Buffer::empty();
+        for c in "foo  bar baz".chars() {
+            b.insert_char(c);
+        }
+        // Curseur en fin ("baz" à l'index 9..12), col = 12.
+        b.move_word_left();
+        assert_eq!(b.cursor_col, 9); // début de "baz"
+        b.move_word_left();
+        assert_eq!(b.cursor_col, 5); // début de "bar"
+        b.move_word_left();
+        assert_eq!(b.cursor_col, 0); // début de "foo"
+        b.move_word_right();
+        assert_eq!(b.cursor_col, 5); // début de "bar"
+        b.move_word_right();
+        assert_eq!(b.cursor_col, 9); // début de "baz"
+    }
+
+    #[test]
+    fn word_moves_cross_line_boundaries() {
+        let mut b = Buffer::empty();
+        for c in "ab".chars() {
+            b.insert_char(c);
+        }
+        b.insert_newline();
+        for c in "cd".chars() {
+            b.insert_char(c);
+        }
+        b.move_home(); // (1, 0)
+        b.move_word_left(); // début de ligne → fin ligne précédente
+        assert_eq!((b.cursor_row, b.cursor_col), (0, 2));
+    }
+
+    #[test]
+    fn delete_word_removes_previous_word_and_spaces() {
+        let mut b = Buffer::empty();
+        for c in "foo bar".chars() {
+            b.insert_char(c);
+        }
+        b.delete_word_left(); // retire "bar"
+        assert_eq!(b.lines[0], "foo ");
+        assert_eq!(b.cursor_col, 4);
+        b.delete_word_left(); // retire " foo" (espaces + mot)
+        assert_eq!(b.lines[0], "");
+        assert_eq!(b.cursor_col, 0);
+        // Contenu revenu au tampon vide initial : dirty exact → faux.
+        assert!(!b.dirty);
+        // Chaque Ctrl-W est une étape d'annulation distincte.
+        b.undo();
+        assert_eq!(b.lines[0], "foo ");
+        b.undo();
+        assert_eq!(b.lines[0], "foo bar");
     }
 
     #[test]

@@ -408,6 +408,12 @@ impl App {
                     }
                     return;
                 }
+                KeyCode::Char('w') => {
+                    if self.focus == Focus::Editor {
+                        self.editor_mut().delete_word_left();
+                    }
+                    return;
+                }
                 KeyCode::Char('z') => {
                     if self.focus == Focus::Editor {
                         self.status = if self.editor_mut().undo() {
@@ -639,7 +645,10 @@ impl App {
     }
 
     fn on_key_editor(&mut self, key: KeyEvent) {
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
         match key.code {
+            KeyCode::Left if alt => self.editor_mut().move_word_left(),
+            KeyCode::Right if alt => self.editor_mut().move_word_right(),
             KeyCode::Up => self.editor_mut().move_up(),
             KeyCode::Down => self.editor_mut().move_down(),
             KeyCode::Left => self.editor_mut().move_left(),
@@ -1685,6 +1694,30 @@ mod tests {
         app.on_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
         type_in_search(&mut app, "zzz");
         assert!(app.status.contains("introuvable"));
+    }
+
+    // --- opérations par mot ---
+
+    #[test]
+    fn ctrl_w_deletes_previous_word_in_editor() {
+        let mut app = app();
+        app.focus = Focus::Editor;
+        for c in "foo bar".chars() {
+            app.on_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        app.on_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        assert_eq!(app.editor().lines[0], "foo ");
+    }
+
+    #[test]
+    fn alt_left_moves_by_word_in_editor() {
+        let mut app = app();
+        app.focus = Focus::Editor;
+        for c in "foo bar".chars() {
+            app.on_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::ALT));
+        assert_eq!(app.editor().cursor_col, 4); // début de "bar"
     }
 
     // --- aller à la ligne ---
