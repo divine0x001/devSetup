@@ -35,7 +35,7 @@ const MAX_DEPTH: usize = 6;
 const MAX_ENTRIES: usize = 20_000;
 
 /// Commandes éditeur disponibles dans le mode `:` (nom, description).
-const EDITOR_COMMANDS: [(&str, &str); 15] = [
+const EDITOR_COMMANDS: [(&str, &str); 16] = [
     (":help", "liste toutes les commandes disponibles"),
     (":<n> | :goto <n>", "place le curseur sur la ligne n"),
     (":w", "sauvegarde le fichier courant"),
@@ -57,6 +57,10 @@ const EDITOR_COMMANDS: [(&str, &str); 15] = [
     (":close", "ferme l'onglet courant (refusé si modifié)"),
     (":git", "affiche un rapport git à la place du code"),
     (":code", "revient à la vue code (arbre + éditeur)"),
+    (
+        ":open",
+        "ouvre le fichier dans l'éditeur externe (editor_cmd)",
+    ),
 ];
 
 /// Raccourcis clavier de l'éditeur (touche, description), affichés par `:help`.
@@ -1056,6 +1060,10 @@ impl App {
                 self.open_code_view();
                 true
             }
+            "open" => {
+                self.open_external();
+                true
+            }
             "e" => {
                 match args.first() {
                     Some(file) => {
@@ -1134,6 +1142,21 @@ impl App {
                 self.output.push(format!("error: {err}"));
                 self.status = "erreur".to_string();
             }
+        }
+    }
+
+    /// Ouvre le fichier de l'onglet actif dans l'éditeur externe configuré
+    /// (`editor_cmd` de `devx.toml`). Sans fichier associé, invite à sauvegarder.
+    fn open_external(&mut self) {
+        let Some(path) = self.editor().path.clone() else {
+            self.output
+                .push("usage: :open nécessite un fichier (:w d'abord)".to_string());
+            return;
+        };
+        let cmd = self.ctx.config.editor_cmd.clone();
+        match std::process::Command::new(&cmd).arg(&path).spawn() {
+            Ok(_) => self.status = format!("ouvert dans {cmd}"),
+            Err(err) => self.output.push(format!("error: :open {cmd}: {err}")),
         }
     }
 
@@ -1985,6 +2008,30 @@ mod tests {
         app.input = "e read".to_string();
         app.on_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         assert_eq!(app.input, "e readme.md");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // --- éditeur externe ---
+
+    #[test]
+    fn open_without_path_prompts_to_save() {
+        let mut app = app();
+        app.input = "open".to_string();
+        app.submit();
+        assert!(app.output.iter().any(|l| l.contains(":open nécessite")));
+    }
+
+    #[test]
+    fn open_spawns_configured_editor_command() {
+        let root = temp_workspace("open-external");
+        fs::write(root.join("a.txt"), "A\n").unwrap();
+        let mut app = app_at(&root);
+        // editor_cmd inoffensif qui existe sur le système.
+        app.ctx.config.editor_cmd = "true".to_string();
+        open_file(&mut app, &root, "a.txt");
+        app.input = "open".to_string();
+        app.submit();
+        assert_eq!(app.status, "ouvert dans true");
         let _ = fs::remove_dir_all(&root);
     }
 
