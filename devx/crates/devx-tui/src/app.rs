@@ -35,11 +35,13 @@ const MAX_DEPTH: usize = 6;
 const MAX_ENTRIES: usize = 20_000;
 
 /// Commandes éditeur disponibles dans le mode `:` (nom, description).
-const EDITOR_COMMANDS: [(&str, &str); 13] = [
+const EDITOR_COMMANDS: [(&str, &str); 15] = [
     (":help", "liste toutes les commandes disponibles"),
     (":<n> | :goto <n>", "place le curseur sur la ligne n"),
     (":w", "sauvegarde le fichier courant"),
     (":wq", "sauvegarde puis quitte"),
+    (":wa", "sauvegarde tous les onglets modifiés"),
+    (":wqa", "sauvegarde tous les onglets puis quitte"),
     (":q", "quitte (refusé si modifications en attente)"),
     (":q!", "quitte sans sauvegarder"),
     (
@@ -851,6 +853,15 @@ impl App {
                 self.quit_if_clean();
                 true
             }
+            "wa" => {
+                self.save_all();
+                true
+            }
+            "wqa" => {
+                self.save_all();
+                self.quit_if_clean();
+                true
+            }
             "q" => {
                 self.quit_if_clean();
                 true
@@ -958,6 +969,30 @@ impl App {
                 self.status = "erreur".to_string();
             }
         }
+    }
+
+    /// Sauvegarde tous les onglets modifiés qui ont un fichier associé. Les
+    /// onglets sans chemin (« sans-titre ») sont laissés tels quels. Met à jour
+    /// l'arbre et le statut avec le bilan.
+    fn save_all(&mut self) {
+        let mut saved = 0usize;
+        let mut errors = Vec::new();
+        for tab in &mut self.tabs {
+            if tab.path.is_none() || !tab.dirty {
+                continue;
+            }
+            match tab.save() {
+                Ok(()) => saved += 1,
+                Err(err) => errors.push(format!("error: {err}")),
+            }
+        }
+        for err in &errors {
+            self.output.push(err.clone());
+        }
+        self.output
+            .push(format!("{saved} fichier(s) sauvegardé(s)"));
+        self.status = format!("{saved} sauvegardé(s)");
+        self.refresh_tree();
     }
 
     /// Déplace le curseur sur la ligne `n` (1-based, bornée), bascule en vue
@@ -1087,6 +1122,45 @@ mod tests {
         app.submit();
         assert!(!app.should_quit);
         assert!(app.output.iter().any(|l| l.contains("non sauvegardées")));
+    }
+
+    #[test]
+    fn write_all_saves_every_dirty_tab() {
+        let root = temp_workspace("write-all");
+        fs::write(root.join("a.txt"), "A\n").unwrap();
+        fs::write(root.join("b.txt"), "B\n").unwrap();
+        let mut app = app_at(&root);
+        open_file(&mut app, &root, "a.txt");
+        app.editor_mut().insert_char('X');
+        open_file(&mut app, &root, "b.txt");
+        app.editor_mut().insert_char('Y');
+        app.input = "wa".to_string();
+        app.submit();
+        // Les deux onglets sont propres et le disque reflète les modifs.
+        assert!(app.tabs.iter().all(|t| !t.dirty));
+        assert!(fs::read_to_string(root.join("a.txt"))
+            .unwrap()
+            .starts_with('X'));
+        assert!(fs::read_to_string(root.join("b.txt"))
+            .unwrap()
+            .starts_with('Y'));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn write_quit_all_saves_then_quits() {
+        let root = temp_workspace("write-quit-all");
+        fs::write(root.join("a.txt"), "A\n").unwrap();
+        let mut app = app_at(&root);
+        open_file(&mut app, &root, "a.txt");
+        app.editor_mut().insert_char('Z');
+        app.input = "wqa".to_string();
+        app.submit();
+        assert!(app.should_quit);
+        assert!(fs::read_to_string(root.join("a.txt"))
+            .unwrap()
+            .starts_with('Z'));
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
