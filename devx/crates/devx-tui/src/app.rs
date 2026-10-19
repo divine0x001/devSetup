@@ -821,6 +821,16 @@ impl App {
     }
 
     fn autocomplete(&mut self) {
+        let (command, args) = parse_command_line(&self.input);
+        // Pour `:e` / `:new`, complète l'argument chemin dans le workspace.
+        if matches!(command.as_str(), "e" | "new") && self.input.ends_with(|c: char| c != ' ') {
+            let partial = args.first().map(String::as_str).unwrap_or("");
+            if let Some(completed) = complete_path(&self.ctx.workspace.root, partial) {
+                self.input = format!("{command} {completed}");
+                return;
+            }
+        }
+        // Sinon, complète le nom de commande via les suggestions.
         let Some(spec) = self.suggestions().first().copied().cloned() else {
             return;
         };
@@ -1053,6 +1063,61 @@ fn inside(area: Rect, x: u16, y: u16) -> bool {
         && x < area.x + area.width
         && y >= area.y
         && y < area.y + area.height
+}
+
+/// Complète un chemin partiel (relatif à `root`) pour `:e`/`:new`. Renvoie le
+/// chemin complété (nom unique, ou plus long préfixe commun) s'il progresse,
+/// sinon `None`. Les répertoires sont suffixés d'un `/`.
+fn complete_path(root: &Path, partial: &str) -> Option<String> {
+    // Sépare la partie répertoire (avec son `/` final) du préfixe à compléter.
+    let (dir_rel, prefix) = match partial.rfind('/') {
+        Some(i) => (&partial[..=i], &partial[i + 1..]),
+        None => ("", partial),
+    };
+    let dir = root.join(dir_rel);
+
+    let mut matches: Vec<String> = fs::read_dir(&dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !name.starts_with(prefix) {
+                return None;
+            }
+            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            Some(if is_dir { format!("{name}/") } else { name })
+        })
+        .collect();
+
+    if matches.is_empty() {
+        return None;
+    }
+    matches.sort();
+
+    let completion = if matches.len() == 1 {
+        matches[0].clone()
+    } else {
+        common_prefix(&matches)
+    };
+    if completion.len() <= prefix.len() {
+        return None; // aucune progression
+    }
+    Some(format!("{dir_rel}{completion}"))
+}
+
+/// Plus long préfixe commun (en `char`) d'un ensemble de chaînes non vide.
+fn common_prefix(items: &[String]) -> String {
+    let first: Vec<char> = items[0].chars().collect();
+    let mut len = first.len();
+    for item in &items[1..] {
+        let common = first
+            .iter()
+            .zip(item.chars())
+            .take_while(|(a, b)| **a == *b)
+            .count();
+        len = len.min(common);
+    }
+    first[..len].iter().collect()
 }
 
 /// Découpe une ligne de commande `:` en (commande, arguments).
@@ -1645,6 +1710,47 @@ mod tests {
             vec!["deux".to_string(), "un".to_string()]
         );
         assert_eq!(app.editor().cursor_row, 1);
+    }
+
+    // --- complétion de chemin ---
+
+    #[test]
+    fn complete_path_completes_unique_match() {
+        let root = temp_workspace("complete-unique");
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/main.rs"), "").unwrap();
+        // "src/ma" → "src/main.rs"
+        assert_eq!(
+            complete_path(&root, "src/ma").as_deref(),
+            Some("src/main.rs")
+        );
+        // Un répertoire est suffixé d'un '/'.
+        assert_eq!(complete_path(&root, "sr").as_deref(), Some("src/"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn complete_path_uses_common_prefix_for_many() {
+        let root = temp_workspace("complete-prefix");
+        fs::write(root.join("alpha.rs"), "").unwrap();
+        fs::write(root.join("alpine.rs"), "").unwrap();
+        // Préfixe commun "alp" → "alp" (progresse depuis "al").
+        assert_eq!(complete_path(&root, "al").as_deref(), Some("alp"));
+        // Aucune progression possible : None.
+        assert_eq!(complete_path(&root, "alp"), None);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn tab_completes_path_argument_for_e_command() {
+        let root = temp_workspace("complete-tab");
+        fs::write(root.join("readme.md"), "").unwrap();
+        let mut app = app_at(&root);
+        app.mode = Mode::Command;
+        app.input = "e read".to_string();
+        app.on_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(app.input, "e readme.md");
+        let _ = fs::remove_dir_all(&root);
     }
 
     // --- aller à la ligne ---
