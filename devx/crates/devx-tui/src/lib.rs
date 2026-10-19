@@ -14,6 +14,7 @@
 
 mod app;
 mod editor;
+mod git;
 mod tree;
 mod ui;
 

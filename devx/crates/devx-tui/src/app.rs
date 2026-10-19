@@ -3,7 +3,6 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -12,8 +11,10 @@ use devx_core::{CommandSpec, Context, DevxError, Output};
 use ratatui::layout::Rect;
 
 use crate::editor::Buffer;
+use crate::git::load_git;
 use crate::tree::{expanded_paths, flatten, restore_expanded, scan_dir, set_expanded_by_path};
 
+pub use crate::git::GitState;
 pub use crate::tree::{Node, Visible};
 
 /// Largeur (en cellules) de la gouttière de numéros de ligne dans l'éditeur.
@@ -85,19 +86,6 @@ pub enum View {
     Code,
     /// Vue « git » : branche, statut et derniers commits.
     Git,
-}
-
-/// Informations git affichées dans la vue « git ».
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct GitState {
-    /// Branche courante (ou « HEAD » si détaché).
-    pub branch: String,
-    /// Lignes de `git status --short --branch`.
-    pub status: Vec<String>,
-    /// Lignes de `git log --oneline`.
-    pub log: Vec<String>,
-    /// Message d'erreur éventuel (hors dépôt git, git absent…).
-    pub error: Option<String>,
 }
 
 /// Géométrie du dernier rendu, utilisée pour la souris (carte de zones).
@@ -996,60 +984,6 @@ fn inside(area: Rect, x: u16, y: u16) -> bool {
         && x < area.x + area.width
         && y >= area.y
         && y < area.y + area.height
-}
-
-/// Lance `git <args>` dans `root` et renvoie la sortie standard (texte).
-fn git_capture(root: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(root)
-        .output()
-        .map_err(|e| format!("git introuvable : {e}"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let detail = stderr.trim();
-        return Err(if detail.is_empty() {
-            format!("`git {}` a échoué", args.join(" "))
-        } else {
-            detail.to_string()
-        });
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-/// Construit l'état git (branche, statut, derniers commits) pour `root`.
-pub fn load_git(root: &Path) -> GitState {
-    let mut state = GitState {
-        branch: "HEAD".to_string(),
-        ..GitState::default()
-    };
-
-    let status = match git_capture(root, &["status", "--short", "--branch"]) {
-        Ok(text) => text,
-        Err(err) => {
-            state.error = Some(err);
-            return state;
-        }
-    };
-
-    let mut lines = status.lines();
-    if let Some(first) = lines.next() {
-        let head = first.trim_start_matches("## ").trim();
-        let name = head.split("...").next().unwrap_or(head);
-        let name = name.split_whitespace().next().unwrap_or("HEAD");
-        state.branch = if name.is_empty() {
-            "HEAD".to_string()
-        } else {
-            name.to_string()
-        };
-    }
-    state.status = lines.map(|l| l.to_string()).collect();
-
-    state.log = git_capture(root, &["log", "--oneline", "-n", "20"])
-        .map(|text| text.lines().map(str::to_string).collect())
-        .unwrap_or_default();
-
-    state
 }
 
 /// Découpe une ligne de commande `:` en (commande, arguments).
