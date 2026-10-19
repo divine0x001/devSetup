@@ -372,6 +372,18 @@ impl App {
                     }
                     return;
                 }
+                KeyCode::Char('d') => {
+                    if self.focus == Focus::Editor {
+                        self.editor_mut().duplicate_line();
+                    }
+                    return;
+                }
+                KeyCode::Char('k') => {
+                    if self.focus == Focus::Editor {
+                        self.editor_mut().delete_line();
+                    }
+                    return;
+                }
                 KeyCode::Char('z') => {
                     if self.focus == Focus::Editor {
                         self.status = if self.editor_mut().undo() {

@@ -349,6 +349,33 @@ impl Buffer {
         self.mark_dirty();
     }
 
+    /// Duplique la ligne courante juste en dessous ; le curseur descend sur la
+    /// copie (une seule étape d'annulation).
+    pub fn duplicate_line(&mut self) {
+        self.record(EditKind::Other);
+        let copy = self.lines[self.cursor_row].clone();
+        self.lines.insert(self.cursor_row + 1, copy);
+        self.cursor_row += 1;
+        self.mark_dirty();
+    }
+
+    /// Supprime la ligne courante. Un tampon à une seule ligne devient une
+    /// ligne vide (jamais zéro ligne).
+    pub fn delete_line(&mut self) {
+        self.record(EditKind::Other);
+        if self.lines.len() == 1 {
+            self.lines[0].clear();
+            self.cursor_col = 0;
+        } else {
+            self.lines.remove(self.cursor_row);
+            if self.cursor_row >= self.lines.len() {
+                self.cursor_row = self.lines.len() - 1;
+            }
+            self.clamp_col();
+        }
+        self.mark_dirty();
+    }
+
     /// Recule le curseur au début du mot précédent (saute les espaces puis le
     /// mot). En début de ligne, passe à la fin de la ligne précédente.
     pub fn move_word_left(&mut self) {
@@ -949,6 +976,31 @@ mod tests {
         assert_eq!(b.lines, vec!["deux", "un"]);
         b.undo();
         assert_eq!(b.lines, vec!["un", "deux"]);
+    }
+
+    #[test]
+    fn duplicate_line_copies_below_and_follows_cursor() {
+        let mut b = buf(&["un", "deux"]);
+        b.cursor_row = 0;
+        b.duplicate_line();
+        assert_eq!(b.lines, vec!["un", "un", "deux"]);
+        assert_eq!(b.cursor_row, 1);
+        b.undo();
+        assert_eq!(b.lines, vec!["un", "deux"]);
+    }
+
+    #[test]
+    fn delete_line_removes_and_keeps_at_least_one_line() {
+        let mut b = buf(&["un", "deux", "trois"]);
+        b.cursor_row = 1;
+        b.delete_line();
+        assert_eq!(b.lines, vec!["un", "trois"]);
+        assert_eq!(b.cursor_row, 1); // reste sur l'ancienne position (= "trois")
+                                     // Supprimer jusqu'à la dernière laisse une ligne vide.
+        b.delete_line();
+        b.delete_line();
+        assert_eq!(b.lines, vec![""]);
+        assert_eq!(b.cursor_row, 0);
     }
 
     #[test]
