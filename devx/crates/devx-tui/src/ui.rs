@@ -165,20 +165,47 @@ fn draw_tree(frame: &mut Frame, area: Rect, app: &mut App) {
     frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
-/// Greffon (widgets) dessiné au-dessus de l'éditeur : un item par onglet.
+/// Greffon (widgets) dessiné au-dessus de l'éditeur : un item par onglet. La
+/// barre défile pour garder l'onglet actif visible quand les onglets débordent.
 fn draw_tab_bar(frame: &mut Frame, area: Rect, app: &mut App) {
     let focused = app.focus == Focus::Editor && app.mode == Mode::Normal;
-    let mut spans: Vec<Span> = Vec::with_capacity(app.tabs.len() * 2 + 1);
-    app.layout.tab_spans.clear();
     app.layout.tabs = area;
 
+    // Libellé et largeur de chaque onglet.
+    let labels: Vec<(String, u16)> = app
+        .tabs
+        .iter()
+        .map(|tab| {
+            let star = if tab.dirty { "*" } else { "" };
+            let label = format!(" {}{star} ", tab.display_name());
+            let width = label.chars().count() as u16;
+            (label, width)
+        })
+        .collect();
+
+    // Premier onglet visible : le plus petit `first` tel que l'onglet actif
+    // tienne dans la zone (défilement horizontal).
+    let mut first = 0usize;
+    while first < app.active {
+        let used: u16 = labels[first..=app.active].iter().map(|(_, w)| *w).sum();
+        if used <= area.width {
+            break;
+        }
+        first += 1;
+    }
+
+    // Rect de clic par onglet ; zéro (donc ignoré) pour les onglets masqués.
+    app.layout.tab_spans = vec![Rect::new(0, 0, 0, 1); app.tabs.len()];
+
+    let mut spans: Vec<Span> = Vec::new();
     let mut x = area.x;
-    for (idx, tab) in app.tabs.iter().enumerate() {
-        let name = tab.display_name();
-        let star = if tab.dirty { "*" } else { "" };
-        let label = format!(" {name}{star} ");
-        let width = label.chars().count() as u16;
-        app.layout.tab_spans.push(Rect::new(x, area.y, width, 1));
+    for (idx, (label, width)) in labels.iter().enumerate().skip(first) {
+        // Toujours rendre le premier onglet visible (il contient l'actif),
+        // puis s'arrêter dès qu'un onglet ne tient plus.
+        if idx != first && x + width > area.x + area.width {
+            break;
+        }
+        app.layout.tab_spans[idx] = Rect::new(x, area.y, *width, 1);
         let style = if idx == app.active {
             Style::default()
                 .fg(Color::Black)
@@ -191,7 +218,7 @@ fn draw_tab_bar(frame: &mut Frame, area: Rect, app: &mut App) {
         } else {
             Style::default().fg(Color::Gray)
         };
-        spans.push(Span::styled(label, style));
+        spans.push(Span::styled(label.clone(), style));
         x += width;
     }
     // Reste de la ligne en fond neutre pour « effacer » l'ancien rendu.
@@ -747,6 +774,32 @@ mod tests {
         assert!(
             screen.contains("notes.txt*"),
             "indicateur de modification manquant:\n{screen}"
+        );
+    }
+
+    #[test]
+    fn tab_bar_scrolls_to_keep_active_visible() {
+        use crate::Buffer;
+        let ctx = Context::with_root(".");
+        let exec: Executor = Box::new(|_c, _cmd, _args| Ok(Output::empty()));
+        let mut app = App::new(ctx, vec![], exec, None);
+        for i in 0..6 {
+            app.tabs
+                .push(Buffer::empty_with_path(format!("fichier{i}.txt")));
+        }
+        app.active = app.tabs.len() - 1; // dernier onglet actif
+
+        let mut terminal = Terminal::new(TestBackend::new(30, 10)).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+
+        // L'onglet actif a une zone de clic visible ; le premier est masqué.
+        assert!(
+            app.layout.tab_spans[app.active].width > 0,
+            "l'onglet actif doit rester visible"
+        );
+        assert_eq!(
+            app.layout.tab_spans[0].width, 0,
+            "les onglets qui débordent sont masqués"
         );
     }
 
