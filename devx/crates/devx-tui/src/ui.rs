@@ -32,7 +32,15 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         .split(chunks[1]);
     draw_tree(frame, body[0], app);
     match app.view {
-        View::Code => draw_editor(frame, body[1], app),
+        View::Code => {
+            // Barre d'onglets + éditeur dans la colonne centrale.
+            let center = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(1), Constraint::Min(3)])
+                .split(body[1]);
+            draw_tab_bar(frame, center[0], app);
+            draw_editor(frame, center[1], app);
+        }
         View::Git => {
             // En vue git, aucun clic éditeur : on neutralise la zone.
             app.layout.editor = Rect::default();
@@ -58,10 +66,10 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
         Mode::Command => "COMMANDE",
         Mode::Palette => "PALETTE",
     };
-    let (row, col) = app.editor.cursor_position();
-    let dirty = if app.editor.dirty { " [*]" } else { "" };
+    let (row, col) = app.editor().cursor_position();
+    let dirty = if app.editor().dirty { " [*]" } else { "" };
     let path = app
-        .editor
+        .editor()
         .path
         .as_deref()
         .map(|p| p.display().to_string())
@@ -150,14 +158,62 @@ fn draw_tree(frame: &mut Frame, area: Rect, app: &mut App) {
     frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
+/// Greffon (widgets) dessiné au-dessus de l'éditeur : un item par onglet.
+fn draw_tab_bar(frame: &mut Frame, area: Rect, app: &mut App) {
+    let focused = app.focus == Focus::Editor && app.mode == Mode::Normal;
+    let mut spans: Vec<Span> = Vec::with_capacity(app.tabs.len() * 2 + 1);
+    app.layout.tab_spans.clear();
+    app.layout.tabs = area;
+
+    let mut x = area.x;
+    for (idx, tab) in app.tabs.iter().enumerate() {
+        let name = tab
+            .path
+            .as_deref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "sans-titre".to_string());
+        let star = if tab.dirty { "*" } else { "" };
+        let label = format!(" {name}{star} ");
+        let width = label.chars().count() as u16;
+        app.layout.tab_spans.push(Rect::new(x, area.y, width, 1));
+        let style = if idx == app.active {
+            Style::default()
+                .fg(Color::Black)
+                .bg(if focused {
+                    Color::Cyan
+                } else {
+                    Color::DarkGray
+                })
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+        spans.push(Span::styled(label, style));
+        x += width;
+    }
+    // Reste de la ligne en fond neutre pour « effacer » l'ancien rendu.
+    if x < area.x + area.width {
+        spans.push(Span::styled(
+            " ".repeat((area.x + area.width - x) as usize),
+            Style::default(),
+        ));
+    }
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
 fn draw_editor(frame: &mut Frame, area: Rect, app: &mut App) {
     let focused = app.focus == Focus::Editor && app.mode == Mode::Normal;
-    let editor = &app.editor;
-    let row = editor.cursor_row;
-    let col = editor.cursor_col;
     let inner_w = area.width.saturating_sub(2) as usize;
     let inner_h = area.height.saturating_sub(2) as usize;
     let gutter_w = EDITOR_GUTTER;
+
+    // Lecture de l'état de l'onglet actif (emprunt court).
+    let (row, col) = {
+        let editor = app.editor();
+        (editor.cursor_row, editor.cursor_col)
+    };
 
     // Fenêtres de visibilité (défilement vertical et horizontal).
     let y_offset = if inner_h > 0 && row >= inner_h {
@@ -190,7 +246,7 @@ fn draw_editor(frame: &mut Frame, area: Rect, app: &mut App) {
     let contents = if inner_h == 0 {
         Vec::new()
     } else {
-        build_editor_lines(editor, row, col, y_offset, x_offset, text_w, inner_h)
+        build_editor_lines(app.editor(), row, col, y_offset, x_offset, text_w, inner_h)
     };
 
     frame.render_widget(Paragraph::new(contents).block(block), area);
@@ -413,7 +469,7 @@ fn draw_hint(frame: &mut Frame, area: Rect, app: &App) {
                         .to_string()
                 }
                 Focus::Editor => {
-                    "clic: placer le curseur · flèches: déplacer · Ctrl-S: sauver · Tab: arbre · : : commande · :git"
+                    "clic: placer le curseur · flèches: déplacer · Ctrl-S: sauver · Ctrl-←/→: onglets · Tab: arbre · : : commande"
                         .to_string()
                 }
             },
@@ -600,5 +656,58 @@ mod tests {
         app.view = View::Git;
         render_app(&mut app, 100, 30);
         assert_eq!(app.layout.editor, Rect::default());
+    }
+
+    /// Deux onglets ouverts, prêt au rendu.
+    fn app_with_tabs() -> App {
+        use crate::Buffer;
+        let ctx = Context::with_root(".");
+        let specs = vec![CommandSpec::new("tree", "arborescence", "tree")];
+        let exec: Executor = Box::new(|_c, _cmd, _args| Ok(Output::empty()));
+        let mut app = App::new(ctx, specs, exec, None);
+        app.tabs.push(Buffer::empty_with_path("notes.txt"));
+        app
+    }
+
+    #[test]
+    fn tab_bar_lists_open_buffers() {
+        let mut app = app_with_tabs();
+        let screen = render_app(&mut app, 100, 30);
+        assert!(
+            screen.contains("sans-titre"),
+            "premier onglet manquant:\n{screen}"
+        );
+        assert!(screen.contains("notes.txt"), "onglet manquant:\n{screen}");
+    }
+
+    #[test]
+    fn tab_bar_click_switches_active_tab() {
+        let mut app = app_with_tabs();
+        let _screen = render_app(&mut app, 100, 30);
+        // Le rendu a rempli la géométrie des onglets.
+        let rects = app.layout.tab_spans.clone();
+        assert_eq!(rects.len(), 2);
+        app.on_mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: rects[1].x + 1,
+            row: rects[1].y,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        });
+        assert_eq!(app.active, 1);
+        assert_eq!(
+            app.editor().path.as_deref(),
+            Some(std::path::Path::new("notes.txt"))
+        );
+    }
+
+    #[test]
+    fn tab_bar_marks_dirty_buffer() {
+        let mut app = app_with_tabs();
+        app.tabs[1].dirty = true;
+        let screen = render_app(&mut app, 100, 30);
+        assert!(
+            screen.contains("notes.txt*"),
+            "indicateur de modification manquant:\n{screen}"
+        );
     }
 }

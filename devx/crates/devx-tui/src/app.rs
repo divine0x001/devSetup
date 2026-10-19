@@ -16,6 +16,9 @@ use crate::editor::Buffer;
 /// Largeur (en cellules) de la gouttière de numéros de ligne dans l'éditeur.
 pub const EDITOR_GUTTER: usize = 6;
 
+/// Largeur d'une tabulation dans l'éditeur (insertion d'espaces).
+pub const EDITOR_TAB: usize = 4;
+
 /// Callback d'exécution de commande fourni par l'hôte (le binaire `devx`).
 ///
 /// La TUI reste découplée des modules : elle délègue l'exécution.
@@ -31,7 +34,7 @@ const MAX_ENTRIES: usize = 20_000;
 const IGNORED_DIRS: [&str; 3] = [".git", "target", "node_modules"];
 
 /// Commandes éditeur disponibles dans le mode `:` (nom, description).
-const EDITOR_COMMANDS: [(&str, &str); 9] = [
+const EDITOR_COMMANDS: [(&str, &str); 12] = [
     (":help", "liste toutes les commandes disponibles"),
     (":w", "sauvegarde le fichier courant"),
     (":wq", "sauvegarde puis quitte"),
@@ -45,6 +48,9 @@ const EDITOR_COMMANDS: [(&str, &str); 9] = [
         ":new <fichier>",
         "crée un nouveau fichier et l'ouvre dans l'éditeur",
     ),
+    (":next", "onglet suivant"),
+    (":prev", "onglet précédent"),
+    (":close", "ferme l'onglet courant (refusé si modifié)"),
     (":git", "affiche un rapport git à la place du code"),
     (":code", "revient à la vue code (arbre + éditeur)"),
 ];
@@ -124,12 +130,16 @@ pub struct Visible {
 }
 
 /// Géométrie du dernier rendu, utilisée pour la souris (carte de zones).
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct LayoutInfo {
     /// Zone de l'arbre de fichiers.
     pub tree: Rect,
     /// Défilement vertical appliqué à l'arbre.
     pub tree_offset: usize,
+    /// Zone de la barre d'onglets (au-dessus de l'éditeur).
+    pub tabs: Rect,
+    /// Rects individuels de chaque onglet (clic → sélection).
+    pub tab_spans: Vec<Rect>,
     /// Zone de l'éditeur (cadre compris).
     pub editor: Rect,
     /// Défilement vertical de l'éditeur.
@@ -154,8 +164,10 @@ pub struct App {
     pub nodes: Vec<Node>,
     /// Index de la ligne sélectionnée dans l'arbre.
     pub selection: usize,
-    /// Tampon de l'éditeur.
-    pub editor: Buffer,
+    /// Onglets ouverts (un tampon par onglet) ; `tabs[active]` est édité.
+    pub tabs: Vec<Buffer>,
+    /// Index de l'onglet actif dans `tabs`.
+    pub active: usize,
     /// Lignes de la zone de sortie.
     pub output: Vec<String>,
     /// Contenu de la barre de commande.
@@ -186,10 +198,11 @@ impl App {
         let nodes = scan_dir(&ctx.workspace.root, MAX_DEPTH, &mut budget);
         let mut output = vec![
             "devx — VS Code dans le terminal".to_string(),
-            "Tab: changer de panneau · : commande · Ctrl-P: palette · q: quitter".to_string(),
+            "Onglets: Ctrl-←/→ · Tab: changer de panneau · : commande · Ctrl-P: palette · q: quitter"
+                .to_string(),
         ];
 
-        let editor = match initial_file {
+        let buffer = match initial_file {
             Some(path) => {
                 let path = if path.is_absolute() {
                     path
@@ -206,7 +219,7 @@ impl App {
             }
             None => Buffer::empty(),
         };
-        let focus = if editor.path.is_some() {
+        let focus = if buffer.path.is_some() {
             Focus::Editor
         } else {
             Focus::Tree
@@ -220,7 +233,8 @@ impl App {
             should_quit: false,
             nodes,
             selection: 0,
-            editor,
+            tabs: vec![buffer],
+            active: 0,
             output,
             input: String::new(),
             palette_selected: 0,
@@ -230,6 +244,64 @@ impl App {
             layout: LayoutInfo::default(),
             executor,
         }
+    }
+
+    /// Tampon de l'onglet actif (lecture).
+    pub fn editor(&self) -> &Buffer {
+        &self.tabs[self.active]
+    }
+
+    /// Tampon de l'onglet actif (édition).
+    pub fn editor_mut(&mut self) -> &mut Buffer {
+        let active = self.active;
+        &mut self.tabs[active]
+    }
+
+    /// Nombre d'onglets ouverts.
+    pub fn tab_count(&self) -> usize {
+        self.tabs.len()
+    }
+
+    /// Passe à l'onglet voisin (bouclant) ; sans effet avec un seul onglet.
+    pub fn switch_tab(&mut self, delta: isize) {
+        let n = self.tabs.len();
+        if n < 2 {
+            return;
+        }
+        self.active = (self.active as isize + delta).rem_euclid(n as isize) as usize;
+        self.status = format!("onglet {}/{}", self.active + 1, n);
+    }
+
+    /// Ouvre un tampon dans un onglet : si un onglet pointe déjà vers le même
+    /// fichier, il est simplement activé (les modifications en attente sont
+    /// préservées) ; sinon l'onglet est ajouté en fin de liste.
+    pub fn open_tab(&mut self, buffer: Buffer) {
+        if let Some(pos) = self.tabs.iter().position(|tab| tab.path == buffer.path) {
+            self.active = pos;
+        } else {
+            self.tabs.push(buffer);
+            self.active = self.tabs.len() - 1;
+        }
+        self.focus = Focus::Editor;
+    }
+
+    /// Ferme l'onglet actif : refusé si modifié ; avec le dernier onglet.
+    /// ouvert, remplace par un tampon vide.
+    pub fn close_tab(&mut self) {
+        if self.editor().dirty {
+            let msg = "onglet modifié — :w puis :close, ou :q!".to_string();
+            self.output.push(msg.clone());
+            self.status = msg;
+            return;
+        }
+        self.tabs.remove(self.active);
+        if self.tabs.is_empty() {
+            self.tabs.push(Buffer::empty());
+        }
+        if self.active >= self.tabs.len() {
+            self.active = self.tabs.len() - 1;
+        }
+        self.status = format!("onglet {}/{} fermé", self.active + 1, self.tabs.len());
     }
 
     /// Aplati l'arbre en tenant compte des répertoires dépliés.
@@ -296,6 +368,14 @@ impl App {
                     self.status = "nouveau fichier — tape le nom puis Entrée".to_string();
                     return;
                 }
+                KeyCode::Left => {
+                    self.switch_tab(-1);
+                    return;
+                }
+                KeyCode::Right => {
+                    self.switch_tab(1);
+                    return;
+                }
                 _ => {}
             }
         }
@@ -308,6 +388,12 @@ impl App {
                     self.mode = Mode::Command;
                     self.input.clear();
                     self.status = "commande (:) — Échap pour annuler".to_string();
+                }
+                KeyCode::Tab if self.focus == Focus::Editor => {
+                    self.editor_mut().insert_tab(EDITOR_TAB);
+                }
+                KeyCode::BackTab if self.focus == Focus::Editor => {
+                    self.editor_mut().remove_tab(EDITOR_TAB);
                 }
                 KeyCode::Tab => self.toggle_focus(),
                 _ => match self.focus {
@@ -343,20 +429,36 @@ impl App {
     }
 
     fn on_left_click(&mut self, x: u16, y: u16) {
-        if inside(self.layout.tree, x, y) {
+        if inside(self.layout.tabs, x, y) {
+            self.on_tab_click(x);
+        } else if inside(self.layout.tree, x, y) {
             self.on_tree_click(x, y);
         } else if inside(self.layout.editor, x, y) {
             self.on_editor_click(x, y);
         }
     }
 
+    /// Clic dans la barre d'onglets : active l'onglet cliqué.
+    fn on_tab_click(&mut self, x: u16) {
+        let Some(pos) = self
+            .layout
+            .tab_spans
+            .iter()
+            .position(|r| r.width > 0 && x >= r.x && x < r.x + r.width)
+        else {
+            return;
+        };
+        self.active = pos;
+        self.status = format!("onglet {}/{}", pos + 1, self.tabs.len());
+    }
+
     pub fn on_scroll(&mut self, x: u16, y: u16, delta: i32) {
         if inside(self.layout.editor, x, y) {
             for _ in 0..delta.abs() {
                 if delta < 0 {
-                    self.editor.move_up();
+                    self.editor_mut().move_up();
                 } else {
-                    self.editor.move_down();
+                    self.editor_mut().move_down();
                 }
             }
             self.focus = Focus::Editor;
@@ -395,13 +497,14 @@ impl App {
         if rel_y < 0 {
             return;
         }
-        let last_row = self.editor.lines.len().saturating_sub(1);
+        let last_row = self.editor().lines.len().saturating_sub(1);
         let row = ((rel_y as usize) + self.layout.editor_y_offset).min(last_row);
         let col_vis = if rel_x < 0 { 0 } else { rel_x as usize };
-        let line_len = self.editor.lines[row].chars().count();
+        let line_len = self.editor().lines[row].chars().count();
         let col = (col_vis + self.layout.editor_x_offset).min(line_len);
-        self.editor.cursor_row = row;
-        self.editor.cursor_col = col;
+        let tab = self.editor_mut();
+        tab.cursor_row = row;
+        tab.cursor_col = col;
         self.focus = Focus::Editor;
         self.status = format!("curseur {}:{}", row + 1, col + 1);
     }
@@ -461,20 +564,20 @@ impl App {
 
     fn on_key_editor(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Up => self.editor.move_up(),
-            KeyCode::Down => self.editor.move_down(),
-            KeyCode::Left => self.editor.move_left(),
-            KeyCode::Right => self.editor.move_right(),
-            KeyCode::Home => self.editor.move_home(),
-            KeyCode::End => self.editor.move_end(),
-            KeyCode::Backspace => self.editor.backspace(),
-            KeyCode::Delete => self.editor.delete(),
-            KeyCode::Enter => self.editor.insert_newline(),
+            KeyCode::Up => self.editor_mut().move_up(),
+            KeyCode::Down => self.editor_mut().move_down(),
+            KeyCode::Left => self.editor_mut().move_left(),
+            KeyCode::Right => self.editor_mut().move_right(),
+            KeyCode::Home => self.editor_mut().move_home(),
+            KeyCode::End => self.editor_mut().move_end(),
+            KeyCode::Backspace => self.editor_mut().backspace(),
+            KeyCode::Delete => self.editor_mut().delete(),
+            KeyCode::Enter => self.editor_mut().insert_newline(),
             KeyCode::Esc => {
                 self.focus = Focus::Tree;
                 self.status = "focus: arbre de fichiers".to_string();
             }
-            KeyCode::Char(c) => self.editor.insert_char(c),
+            KeyCode::Char(c) => self.editor_mut().insert_char(c),
             _ => {}
         }
     }
@@ -531,8 +634,7 @@ impl App {
         let path = row.path.clone();
         match Self::load_into(&path) {
             Ok(buffer) => {
-                self.editor = buffer;
-                self.focus = Focus::Editor;
+                self.open_tab(buffer);
                 self.status = format!("ouvert {}", path.display());
             }
             Err(err) => self.output.push(format!("error: {err}")),
@@ -613,13 +715,13 @@ impl App {
             }
             "wq" => {
                 self.save_editor();
-                if !self.editor.dirty {
+                if !self.editor().dirty {
                     self.should_quit = true;
                 }
                 true
             }
             "q" => {
-                if self.editor.dirty {
+                if self.editor().dirty {
                     let msg = "modifications non sauvegardées — :w puis :q, ou :q!".to_string();
                     self.output.push(msg.clone());
                     self.status = msg;
@@ -630,6 +732,18 @@ impl App {
             }
             "q!" => {
                 self.should_quit = true;
+                true
+            }
+            "next" => {
+                self.switch_tab(1);
+                true
+            }
+            "prev" => {
+                self.switch_tab(-1);
+                true
+            }
+            "close" => {
+                self.close_tab();
                 true
             }
             "git" => {
@@ -651,8 +765,7 @@ impl App {
                         };
                         match Self::load_into(&path) {
                             Ok(buffer) => {
-                                self.editor = buffer;
-                                self.focus = Focus::Editor;
+                                self.open_tab(buffer);
                                 self.status = format!("ouvert {}", path.display());
                             }
                             Err(err) => self.output.push(format!("error: :e {err}")),
@@ -693,8 +806,7 @@ impl App {
                         return true;
                     }
                 }
-                self.editor = Buffer::empty_with_path(&path);
-                self.focus = Focus::Editor;
+                self.open_tab(Buffer::empty_with_path(&path));
                 self.refresh_tree();
                 self.status = format!("nouveau fichier {} — :w pour sauvegarder", path.display());
                 true
@@ -704,10 +816,10 @@ impl App {
     }
 
     fn save_editor(&mut self) {
-        match self.editor.save() {
+        match self.editor_mut().save() {
             Ok(()) => {
                 let path = self
-                    .editor
+                    .editor()
                     .path
                     .as_deref()
                     .map(|p| p.display().to_string())
@@ -972,7 +1084,7 @@ mod tests {
     #[test]
     fn force_quit_sets_quit_flag() {
         let mut app = app();
-        app.editor.insert_char('x');
+        app.editor_mut().insert_char('x');
         app.input = "q!".to_string();
         app.submit();
         assert!(app.should_quit);
@@ -981,7 +1093,7 @@ mod tests {
     #[test]
     fn quit_blocks_on_dirty_buffer() {
         let mut app = app();
-        app.editor.insert_char('x');
+        app.editor_mut().insert_char('x');
         app.input = "q".to_string();
         app.submit();
         assert!(!app.should_quit);
@@ -1005,8 +1117,8 @@ mod tests {
         app.input = format!("e {}", path.display());
         app.submit();
         assert_eq!(app.focus, Focus::Editor);
-        assert_eq!(app.editor.path.as_deref(), Some(path.as_path()));
-        assert_eq!(app.editor.lines[0], "fn main() {}");
+        assert_eq!(app.editor().path.as_deref(), Some(path.as_path()));
+        assert_eq!(app.editor().lines[0], "fn main() {}");
         let _ = std::fs::remove_file(&path);
     }
 
@@ -1018,11 +1130,11 @@ mod tests {
         let mut app = app();
         app.input = format!("e {}", path.display());
         app.submit();
-        app.editor.lines[0].push('!');
-        app.editor.dirty = true;
+        app.editor_mut().lines[0].push('!');
+        app.editor_mut().dirty = true;
         app.input = "w".to_string();
         app.submit();
-        assert!(!app.editor.dirty);
+        assert!(!app.editor().dirty);
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content, "avant!\n");
         let _ = std::fs::remove_file(&path);
@@ -1042,7 +1154,7 @@ mod tests {
         app.input = "new".to_string();
         app.submit();
         assert!(app.output.iter().any(|l| l.contains("usage: :new")));
-        assert!(app.editor.path.is_none());
+        assert!(app.editor().path.is_none());
     }
 
     #[test]
@@ -1053,8 +1165,8 @@ mod tests {
         app.submit();
         let expected = root.join("sub/hello.rs");
         assert_eq!(app.focus, Focus::Editor);
-        assert_eq!(app.editor.path.as_deref(), Some(expected.as_path()));
-        assert!(!app.editor.dirty);
+        assert_eq!(app.editor().path.as_deref(), Some(expected.as_path()));
+        assert!(!app.editor().dirty);
         assert!(root.join("sub").is_dir());
         let _ = fs::remove_dir_all(&root);
     }
@@ -1066,7 +1178,7 @@ mod tests {
         app.input = "new /etc/passwd".to_string();
         app.submit();
         assert!(app.output.iter().any(|l| l.contains("absolu")));
-        assert!(app.editor.path.is_none());
+        assert!(app.editor().path.is_none());
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1077,7 +1189,7 @@ mod tests {
         app.input = "new ../evil.txt".to_string();
         app.submit();
         assert!(app.output.iter().any(|l| l.contains("invalide")));
-        assert!(app.editor.path.is_none());
+        assert!(app.editor().path.is_none());
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1203,7 +1315,7 @@ mod tests {
     #[test]
     fn editor_click_places_cursor() {
         let mut app = app();
-        app.editor.lines = vec!["hello".to_string(), "world".to_string()];
+        app.editor_mut().lines = vec!["hello".to_string(), "world".to_string()];
         app.layout.editor = Rect::new(10, 5, 40, 10);
         app.layout.editor_y_offset = 0;
         app.layout.editor_x_offset = 0;
@@ -1215,14 +1327,14 @@ mod tests {
             modifiers: KeyModifiers::NONE,
         });
         assert_eq!(app.focus, Focus::Editor);
-        assert_eq!(app.editor.cursor_row, 1);
-        assert_eq!(app.editor.cursor_col, 2);
+        assert_eq!(app.editor().cursor_row, 1);
+        assert_eq!(app.editor().cursor_col, 2);
     }
 
     #[test]
     fn editor_click_clamps_past_end_of_line() {
         let mut app = app();
-        app.editor.lines = vec!["hi".to_string()];
+        app.editor_mut().lines = vec!["hi".to_string()];
         app.layout.editor = Rect::new(0, 0, 40, 10);
         app.on_mouse(MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
@@ -1230,14 +1342,14 @@ mod tests {
             row: 1,
             modifiers: KeyModifiers::NONE,
         });
-        assert_eq!(app.editor.cursor_row, 0);
-        assert_eq!(app.editor.cursor_col, 2);
+        assert_eq!(app.editor().cursor_row, 0);
+        assert_eq!(app.editor().cursor_col, 2);
     }
 
     #[test]
     fn scroll_over_editor_moves_cursor() {
         let mut app = app();
-        app.editor.lines = vec![
+        app.editor_mut().lines = vec![
             "a".to_string(),
             "b".to_string(),
             "c".to_string(),
@@ -1250,21 +1362,21 @@ mod tests {
             row: 5,
             modifiers: KeyModifiers::NONE,
         });
-        assert_eq!(app.editor.cursor_row, 1);
+        assert_eq!(app.editor().cursor_row, 1);
         app.on_mouse(MouseEvent {
             kind: MouseEventKind::ScrollUp,
             column: 5,
             row: 5,
             modifiers: KeyModifiers::NONE,
         });
-        assert_eq!(app.editor.cursor_row, 0);
+        assert_eq!(app.editor().cursor_row, 0);
     }
 
     #[test]
     fn mouse_ignored_in_command_mode() {
         let mut app = app();
         app.mode = Mode::Command;
-        app.editor.lines = vec!["hello".to_string()];
+        app.editor_mut().lines = vec!["hello".to_string()];
         app.layout.editor = Rect::new(0, 0, 40, 10);
         app.on_mouse(MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
@@ -1273,5 +1385,220 @@ mod tests {
             modifiers: KeyModifiers::NONE,
         });
         assert_eq!(app.focus, Focus::Tree);
+    }
+
+    // --- tabulations (indentation) ---
+
+    #[test]
+    fn tab_key_inserts_indentation_when_editor_focused() {
+        let mut app = app();
+        app.focus = Focus::Editor;
+        app.editor_mut().lines[0].push_str("fn main() {}");
+        app.editor_mut().cursor_col = 12;
+        app.on_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(
+            app.editor().lines[0],
+            "fn main() {}    ",
+            "la touche Tab doit indenter"
+        );
+        assert_eq!(app.editor().cursor_col, 16);
+        // Le focus n'a pas changé.
+        assert_eq!(app.focus, Focus::Editor);
+    }
+
+    #[test]
+    fn shift_tab_dedents_when_editor_focused() {
+        let mut app = app();
+        app.focus = Focus::Editor;
+        app.editor_mut().lines[0].push_str("    code");
+        app.editor_mut().cursor_col = 4;
+        app.on_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+        assert_eq!(app.editor().lines[0], "code");
+        assert_eq!(app.editor().cursor_col, 0);
+    }
+
+    #[test]
+    fn tab_key_still_toggles_focus_from_tree() {
+        let mut app = app();
+        app.focus = Focus::Tree;
+        app.on_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(app.focus, Focus::Editor);
+    }
+
+    // --- onglets ---
+
+    fn open_file(app: &mut App, root: &Path, name: &str) {
+        app.input = format!("e {}", root.join(name).display());
+        app.submit();
+    }
+
+    #[test]
+    fn opening_two_files_creates_two_tabs() {
+        let root = temp_workspace("tabs-two");
+        fs::write(root.join("a.txt"), "A\n").unwrap();
+        fs::write(root.join("b.txt"), "B\n").unwrap();
+        let mut app = app_at(&root);
+        open_file(&mut app, &root, "a.txt");
+        open_file(&mut app, &root, "b.txt");
+        // Tampon initial vide + deux onglets.
+        assert_eq!(app.tab_count(), 3);
+        assert_eq!(app.active, 2);
+        assert_eq!(app.editor().lines[0], "B");
+        // L'onglet précédent a gardé son contenu.
+        assert_eq!(app.tabs[1].lines[0], "A");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn reopening_same_file_activates_existing_tab() {
+        let root = temp_workspace("tabs-reopen");
+        fs::write(root.join("a.txt"), "A\n").unwrap();
+        let mut app = app_at(&root);
+        open_file(&mut app, &root, "a.txt");
+        let ed = app.editor_mut();
+        ed.move_end();
+        ed.insert_char('!');
+        open_file(&mut app, &root, "a.txt");
+        // Aucun onglet supplémentaire : l'existant est réactivé, ses
+        // modifications en attente préservées.
+        assert_eq!(app.tab_count(), 2);
+        assert_eq!(app.active, 1);
+        assert!(app.editor().dirty);
+        assert!(app.editor().lines[0].starts_with('A'));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn switch_tab_cycles_and_keeps_buffers() {
+        let root = temp_workspace("tabs-cycle");
+        fs::write(root.join("a.txt"), "A\n").unwrap();
+        fs::write(root.join("b.txt"), "B\n").unwrap();
+        let mut app = app_at(&root);
+        open_file(&mut app, &root, "a.txt");
+        open_file(&mut app, &root, "b.txt");
+        switch_tab_prev(&mut app);
+        assert_eq!(app.active, 1);
+        assert_eq!(app.editor().lines[0], "A");
+        let ed = app.editor_mut();
+        ed.move_end();
+        ed.insert_char('X');
+        switch_tab_next(&mut app);
+        assert_eq!(app.editor().lines[0], "B");
+        // L'édition non sauvée de l'onglet A n'a pas été perdue.
+        assert_eq!(app.tabs[1].lines[0], "AX");
+        switch_tab_next(&mut app);
+        // Bouclage : dernier onglet → tampon initial vide.
+        assert_eq!(app.active, 0);
+        assert!(app.editor().path.is_none());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    fn switch_tab_prev(app: &mut App) {
+        app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
+    }
+
+    fn switch_tab_next(app: &mut App) {
+        app.on_key(KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL));
+    }
+
+    #[test]
+    fn ctrl_arrows_cycle_tabs() {
+        let root = temp_workspace("tabs-ctrl");
+        fs::write(root.join("a.txt"), "A\n").unwrap();
+        fs::write(root.join("b.txt"), "B\n").unwrap();
+        let mut app = app_at(&root);
+        open_file(&mut app, &root, "a.txt");
+        open_file(&mut app, &root, "b.txt");
+        app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
+        assert_eq!(app.active, 1);
+        app.on_key(KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL));
+        assert_eq!(app.active, 2);
+        let _ = fs::remove_dir_all(&root);
+    }
+    #[test]
+    fn switch_tab_is_noop_with_single_tab() {
+        let mut app = app();
+        app.switch_tab(1);
+        assert_eq!(app.active, 0);
+        app.switch_tab(-1);
+        assert_eq!(app.active, 0);
+    }
+
+    #[test]
+    fn close_command_refuses_dirty_tab() {
+        let mut app = app();
+        app.editor_mut().insert_char('x');
+        app.input = "close".to_string();
+        app.submit();
+        assert_eq!(app.tab_count(), 1);
+        assert!(app.output.iter().any(|l| l.contains("onglet modifié")));
+    }
+
+    #[test]
+    fn close_command_removes_tab() {
+        let root = temp_workspace("tabs-close");
+        fs::write(root.join("a.txt"), "A\n").unwrap();
+        fs::write(root.join("b.txt"), "B\n").unwrap();
+        let mut app = app_at(&root);
+        open_file(&mut app, &root, "a.txt");
+        open_file(&mut app, &root, "b.txt");
+        app.input = "close".to_string();
+        app.submit();
+        assert_eq!(app.tab_count(), 2); // vide + a.txt
+        assert_eq!(app.editor().lines[0], "A");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn close_last_tab_leaves_empty_buffer() {
+        let mut app = app();
+        app.input = "close".to_string();
+        app.submit();
+        assert_eq!(app.tab_count(), 1);
+        assert!(app.editor().path.is_none());
+        assert!(!app.editor().dirty);
+    }
+
+    #[test]
+    fn click_on_tab_bar_switches_tab() {
+        let mut app = app();
+        // On simule la géométrie remplie par le rendu : deux onglets.
+        app.layout.tabs = Rect::new(0, 0, 20, 1);
+        app.layout.tab_spans = vec![Rect::new(0, 0, 4, 1), Rect::new(4, 0, 4, 1)];
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.active, 1);
+    }
+
+    #[test]
+    fn next_and_prev_commands_cycle_tabs() {
+        let root = temp_workspace("tabs-cmd");
+        fs::write(root.join("a.txt"), "A\n").unwrap();
+        fs::write(root.join("b.txt"), "B\n").unwrap();
+        let mut app = app_at(&root);
+        open_file(&mut app, &root, "a.txt");
+        open_file(&mut app, &root, "b.txt");
+        app.input = "prev".to_string();
+        app.submit();
+        assert_eq!(app.active, 1);
+        app.input = "next".to_string();
+        app.submit();
+        assert_eq!(app.active, 2);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn help_lists_tab_commands() {
+        let mut app = app();
+        app.input = "help".to_string();
+        app.submit();
+        let joined = app.output.join("\n");
+        assert!(joined.contains(":next"));
+        assert!(joined.contains(":prev"));
+        assert!(joined.contains(":close"));
     }
 }

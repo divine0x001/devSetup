@@ -182,6 +182,45 @@ impl Buffer {
         self.cursor_col = 0;
     }
 
+    /// Insère `width` espaces à la position du curseur (touche Tab).
+    pub fn insert_tab(&mut self, width: usize) {
+        if width == 0 {
+            return;
+        }
+        let line = &mut self.lines[self.cursor_row];
+        let mut chars: Vec<char> = line.chars().collect();
+        for _ in 0..width {
+            chars.insert(self.cursor_col, ' ');
+        }
+        *line = chars.into_iter().collect();
+        self.cursor_col += width;
+        self.dirty = true;
+    }
+
+    /// Supprime jusqu'à `width` espaces immédiatement avant le curseur
+    /// (Shift-Tab : désindenter). Sans effet en début de ligne ou si le
+    /// caractère précédent n'est pas un espace.
+    pub fn remove_tab(&mut self, width: usize) {
+        if width == 0 || self.cursor_col == 0 {
+            return;
+        }
+        let before: Vec<char> = self.lines[self.cursor_row]
+            .chars()
+            .take(self.cursor_col)
+            .collect();
+        let run = before.iter().rev().take_while(|c| **c == ' ').count();
+        let n = run.min(width);
+        if n == 0 {
+            return;
+        }
+        let line = &mut self.lines[self.cursor_row];
+        let mut chars: Vec<char> = line.chars().collect();
+        chars.drain(self.cursor_col - n..self.cursor_col);
+        *line = chars.into_iter().collect();
+        self.cursor_col -= n;
+        self.dirty = true;
+    }
+
     /// Place le curseur en fin de ligne.
     pub fn move_end(&mut self) {
         self.cursor_col = self.line_len(self.cursor_row);
@@ -393,5 +432,46 @@ mod tests {
         let mut b = Buffer::empty();
         b.dirty = true;
         assert!(b.save().is_err());
+    }
+
+    #[test]
+    fn insert_tab_writes_spaces_and_really_moves_cursor() {
+        let mut b = Buffer::empty();
+        b.insert_char('a');
+        b.insert_tab(4);
+        assert_eq!(b.lines[0], "a    ");
+        assert_eq!(b.cursor_col, 5);
+        assert!(b.dirty);
+    }
+
+    #[test]
+    fn remove_tab_deletes_consecutive_spaces() {
+        let mut b = Buffer::empty();
+        for c in "  ab".chars() {
+            b.insert_char(c);
+        }
+        // Curseur posé après les 2 espaces (sur 'a') : Shift-Tab les retire.
+        b.cursor_col = 2;
+        b.remove_tab(4);
+        assert_eq!(b.lines[0], "ab");
+        assert_eq!(b.cursor_col, 0);
+
+        // Début de ligne : sans effet.
+        b.remove_tab(4);
+        assert_eq!(b.lines[0], "ab");
+        assert_eq!(b.cursor_col, 0);
+        assert!(b.dirty);
+    }
+
+    #[test]
+    fn remove_tab_stops_at_non_space() {
+        let mut b = Buffer::empty();
+        for c in " ab".chars() {
+            b.insert_char(c);
+        }
+        b.move_end();
+        b.remove_tab(4);
+        assert_eq!(b.lines[0], " ab");
+        assert_eq!(b.cursor_col, 3);
     }
 }
