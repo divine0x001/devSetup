@@ -84,6 +84,16 @@ impl Buffer {
         (self.cursor_row + 1, self.cursor_col + 1)
     }
 
+    /// Nom court affichable du tampon : nom de fichier, ou « sans-titre » pour
+    /// un tampon sans chemin associé.
+    pub fn display_name(&self) -> String {
+        self.path
+            .as_deref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "sans-titre".to_string())
+    }
+
     /// Insère un caractère à la position du curseur.
     pub fn insert_char(&mut self, c: char) {
         let line = &mut self.lines[self.cursor_row];

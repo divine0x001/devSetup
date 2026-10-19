@@ -167,12 +167,7 @@ fn draw_tab_bar(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let mut x = area.x;
     for (idx, tab) in app.tabs.iter().enumerate() {
-        let name = tab
-            .path
-            .as_deref()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "sans-titre".to_string());
+        let name = tab.display_name();
         let star = if tab.dirty { "*" } else { "" };
         let label = format!(" {name}{star} ");
         let width = label.chars().count() as u16;

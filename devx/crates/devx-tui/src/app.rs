@@ -304,6 +304,31 @@ impl App {
         self.status = format!("onglet {}/{} fermé", self.active + 1, self.tabs.len());
     }
 
+    /// Noms des onglets ayant des modifications en attente (tous onglets).
+    fn dirty_tab_names(&self) -> Vec<String> {
+        self.tabs
+            .iter()
+            .filter(|tab| tab.dirty)
+            .map(Buffer::display_name)
+            .collect()
+    }
+
+    /// Quitte si aucun onglet n'a de modification en attente ; sinon refuse en
+    /// nommant les onglets concernés (évite la perte d'un onglet non actif).
+    fn quit_if_clean(&mut self) {
+        let dirty = self.dirty_tab_names();
+        if dirty.is_empty() {
+            self.should_quit = true;
+        } else {
+            let msg = format!(
+                "modifications non sauvegardées ({}) — :w puis :q, ou :q!",
+                dirty.join(", ")
+            );
+            self.output.push(msg.clone());
+            self.status = msg;
+        }
+    }
+
     /// Aplati l'arbre en tenant compte des répertoires dépliés.
     pub fn visible(&self) -> Vec<Visible> {
         let mut out = Vec::new();
@@ -715,19 +740,11 @@ impl App {
             }
             "wq" => {
                 self.save_editor();
-                if !self.editor().dirty {
-                    self.should_quit = true;
-                }
+                self.quit_if_clean();
                 true
             }
             "q" => {
-                if self.editor().dirty {
-                    let msg = "modifications non sauvegardées — :w puis :q, ou :q!".to_string();
-                    self.output.push(msg.clone());
-                    self.status = msg;
-                } else {
-                    self.should_quit = true;
-                }
+                self.quit_if_clean();
                 true
             }
             "q!" => {
@@ -1098,6 +1115,26 @@ mod tests {
         app.submit();
         assert!(!app.should_quit);
         assert!(app.output.iter().any(|l| l.contains("non sauvegardées")));
+    }
+
+    #[test]
+    fn quit_blocks_on_dirty_inactive_tab() {
+        let root = temp_workspace("quit-dirty-inactive");
+        fs::write(root.join("a.txt"), "A\n").unwrap();
+        fs::write(root.join("b.txt"), "B\n").unwrap();
+        let mut app = app_at(&root);
+        open_file(&mut app, &root, "a.txt");
+        app.editor_mut().insert_char('X'); // onglet a.txt modifié
+        open_file(&mut app, &root, "b.txt"); // bascule sur un onglet propre
+        assert!(!app.editor().dirty);
+        app.input = "q".to_string();
+        app.submit();
+        assert!(
+            !app.should_quit,
+            ":q doit refuser tant qu'un onglet est modifié"
+        );
+        assert!(app.output.iter().any(|l| l.contains("a.txt")));
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
