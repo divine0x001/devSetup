@@ -11,6 +11,7 @@
 //!   (respecte `.gitignore`, ignore les binaires).
 //! - `outline <file>` : symboles de premier niveau d'un fichier source.
 //! - `norm [chemin...]` : vérifie la Norme 42 via `norminette`.
+//! - `header <file>` : insère/met à jour l'en-tête standard 42.
 //!
 //! Aucune logique TUI n'est présente ici : uniquement de la logique pure et des
 //! appels `std::process::Command`.
@@ -18,6 +19,7 @@
 #![forbid(unsafe_code)]
 
 mod git;
+mod header;
 mod norm;
 mod outline;
 mod replace;
@@ -89,6 +91,12 @@ impl Module for ToolsModule {
                 "norm [chemin...]",
             )
             .with_aliases(["norminette"]),
+            CommandSpec::new(
+                "header",
+                "Insère ou met à jour l'en-tête 42 (login/mail via $USER42/$MAIL42)",
+                "header <fichier>",
+            )
+            .with_aliases(["stdheader"]),
         ]
     }
 
@@ -101,6 +109,7 @@ impl Module for ToolsModule {
             "replace" | "sub" => replace::execute(ctx, args),
             "outline" | "symbols" => outline::execute(ctx, args),
             "norm" | "norminette" => norm::execute(ctx, args),
+            "header" | "stdheader" => header::execute(ctx, args),
             other => Err(DevxError::unknown_command(other)),
         }
     }
@@ -128,7 +137,7 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            vec!["git", "run", "snip", "session", "replace", "outline", "norm"]
+            vec!["git", "run", "snip", "session", "replace", "outline", "norm", "header"]
         );
     }
 

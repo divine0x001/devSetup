@@ -1023,6 +1023,10 @@ impl App {
                 self.run_norm(args);
                 true
             }
+            "header" | "stdheader" => {
+                self.run_header();
+                true
+            }
             "ne" => {
                 self.jump_error(1);
                 true
@@ -1320,6 +1324,57 @@ impl App {
         }
         let next = (self.norm_idx as isize + delta).rem_euclid(total as isize) as usize;
         self.jump_to_error(next);
+    }
+
+    /// `:header` — applique l'en-tête 42 au fichier de l'onglet actif. Comme la
+    /// génération vit dans le module `header` (côté hôte), on sauvegarde l'onglet
+    /// pour que le disque soit à jour, on délègue l'estampillage via l'exécuteur,
+    /// puis on recharge le fichier estampillé dans l'onglet.
+    fn run_header(&mut self) {
+        let Some(path) = self.editor().path.clone() else {
+            self.output
+                .push("usage: :header nécessite un fichier (:w ou :new d'abord)".to_string());
+            return;
+        };
+
+        // Écrit l'état courant sur disque (crée le fichier d'un onglet neuf) sans
+        // perdre d'édition en attente.
+        if let Err(err) = self.editor_mut().save() {
+            self.output.push(format!("error: {err}"));
+            return;
+        }
+
+        let rel = path
+            .strip_prefix(&self.ctx.workspace.root)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+
+        let lines = {
+            let App { ctx, executor, .. } = self;
+            match executor(ctx, "header", std::slice::from_ref(&rel)) {
+                Ok(result) => result.lines,
+                Err(err) => {
+                    self.output.push(format!("error: {err}"));
+                    return;
+                }
+            }
+        };
+
+        // Recharge le fichier estampillé dans l'onglet courant (même position).
+        match Buffer::load(&path) {
+            Ok(buffer) => {
+                let active = self.active;
+                self.tabs[active] = buffer;
+            }
+            Err(err) => {
+                self.output.push(format!("error: {err}"));
+                return;
+            }
+        }
+        self.output.extend(lines);
+        self.refresh_tree();
+        self.status = "en-tête 42 appliqué".to_string();
     }
 }
 
@@ -2513,5 +2568,38 @@ mod tests {
         app.input = "ne".to_string();
         app.submit();
         assert!(app.output.iter().any(|l| l.contains(":norm")));
+    }
+
+    // --- commande `header` (en-tête 42) ---
+
+    #[test]
+    fn header_stamps_file_and_reloads_buffer() {
+        let root = temp_workspace("header-stamp");
+        fs::write(root.join("main.c"), "int main(void){}\n").unwrap();
+        let ctx = Context::with_root(&root);
+        // Exécuteur factice : émule le module en estampillant le fichier.
+        let exec: Executor = Box::new(|ctx, cmd, args| {
+            assert_eq!(cmd, "header");
+            let p = ctx.workspace.root.join(&args[0]);
+            let orig = fs::read_to_string(&p).unwrap_or_default();
+            fs::write(&p, format!("/* HEADER 42 */\n{orig}")).unwrap();
+            Ok(Output::new(vec![format!("header ajouté: {}", args[0])]))
+        });
+        let mut app = App::new(ctx, specs(), exec, Some(PathBuf::from("main.c")));
+        app.input = "header".to_string();
+        app.submit();
+
+        assert_eq!(app.editor().lines[0], "/* HEADER 42 */");
+        assert!(app.output.iter().any(|l| l.contains("header ajouté")));
+        let on_disk = fs::read_to_string(root.join("main.c")).unwrap();
+        assert!(on_disk.starts_with("/* HEADER 42 */"));
+    }
+
+    #[test]
+    fn header_without_file_shows_usage() {
+        let mut app = app();
+        app.input = "header".to_string();
+        app.submit();
+        assert!(app.output.iter().any(|l| l.contains("usage: :header")));
     }
 }
