@@ -12,16 +12,22 @@
 //! - `outline <file>` : symboles de premier niveau d'un fichier source.
 //! - `norm [chemin...]` : vérifie la Norme 42 via `norminette`.
 //! - `header <file>` : insère/met à jour l'en-tête standard 42.
+//! - `cc <file...>` : compile du C avec les flags 42 (`-Wall -Wextra -Werror`).
+//! - `relink [dir]` : vérifie l'absence de relink d'un Makefile.
+//! - `leaks <bin> [args...]` : exécute un binaire sous détecteur de fuites.
 //!
 //! Aucune logique TUI n'est présente ici : uniquement de la logique pure et des
 //! appels `std::process::Command`.
 
 #![forbid(unsafe_code)]
 
+mod compile;
 mod git;
 mod header;
+mod leaks;
 mod norm;
 mod outline;
+mod relink;
 mod replace;
 mod run;
 mod session;
@@ -97,6 +103,22 @@ impl Module for ToolsModule {
                 "header <fichier>",
             )
             .with_aliases(["stdheader"]),
+            CommandSpec::new(
+                "cc",
+                "Compile du C avec les flags 42 (-Wall -Wextra -Werror)",
+                "cc <fichier.c...>",
+            )
+            .with_aliases(["build"]),
+            CommandSpec::new(
+                "relink",
+                "Vérifie qu'un Makefile ne reconstruit pas inutilement (make puis make -q)",
+                "relink [dossier]",
+            ),
+            CommandSpec::new(
+                "leaks",
+                "Exécute un binaire sous détecteur de fuites (valgrind, sinon leaks)",
+                "leaks <binaire> [args...]",
+            ),
         ]
     }
 
@@ -110,6 +132,9 @@ impl Module for ToolsModule {
             "outline" | "symbols" => outline::execute(ctx, args),
             "norm" | "norminette" => norm::execute(ctx, args),
             "header" | "stdheader" => header::execute(ctx, args),
+            "cc" | "build" => compile::execute(ctx, args),
+            "relink" => relink::execute(ctx, args),
+            "leaks" => leaks::execute(ctx, args),
             other => Err(DevxError::unknown_command(other)),
         }
     }
@@ -137,7 +162,10 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            vec!["git", "run", "snip", "session", "replace", "outline", "norm", "header"]
+            vec![
+                "git", "run", "snip", "session", "replace", "outline", "norm", "header", "cc",
+                "relink", "leaks"
+            ]
         );
     }
 

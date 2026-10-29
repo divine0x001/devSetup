@@ -35,14 +35,18 @@ const MAX_DEPTH: usize = 6;
 const MAX_ENTRIES: usize = 20_000;
 
 /// Commandes éditeur disponibles dans le mode `:` (nom, description).
-const EDITOR_COMMANDS: [(&str, &str); 18] = [
+const EDITOR_COMMANDS: [(&str, &str); 19] = [
     (":help", "liste toutes les commandes disponibles"),
     (":<n> | :goto <n>", "place le curseur sur la ligne n"),
     (
         ":norm [fichier]",
         "vérifie la Norme 42 (défaut : fichier courant)",
     ),
-    (":ne | :pe", "erreur norminette suivante / précédente"),
+    (
+        ":cc [fichier]",
+        "compile aux flags 42 (défaut : fichier courant)",
+    ),
+    (":ne | :pe", "diagnostic suivant / précédent (norm, cc)"),
     (":w", "sauvegarde le fichier courant"),
     (":wq", "sauvegarde puis quitte"),
     (":wa", "sauvegarde tous les onglets modifiés"),
@@ -176,11 +180,11 @@ pub struct App {
     pub git: GitState,
     /// Géométrie du dernier rendu (carte pour la souris).
     pub layout: LayoutInfo,
-    /// Erreurs norminette du dernier `:norm` `(fichier absolu, ligne 1-based)`,
-    /// dans l'ordre d'affichage ; alimente `:ne` / `:pe`.
-    pub norm_errors: Vec<(PathBuf, usize)>,
-    /// Index de l'erreur norminette courante dans `norm_errors`.
-    pub norm_idx: usize,
+    /// Diagnostics navigables du dernier `:norm` ou `:cc`, en `(fichier absolu,
+    /// ligne 1-based)` dans l'ordre d'affichage ; alimente `:ne` / `:pe`.
+    pub diagnostics: Vec<(PathBuf, usize)>,
+    /// Index du diagnostic courant dans `diagnostics`.
+    pub diag_idx: usize,
     executor: Executor,
 }
 
@@ -244,8 +248,8 @@ impl App {
             view: View::Code,
             git: GitState::default(),
             layout: LayoutInfo::default(),
-            norm_errors: Vec::new(),
-            norm_idx: 0,
+            diagnostics: Vec::new(),
+            diag_idx: 0,
             executor,
         }
     }
@@ -1023,6 +1027,10 @@ impl App {
                 self.run_norm(args);
                 true
             }
+            "cc" | "build" => {
+                self.run_cc(args);
+                true
+            }
             "header" | "stdheader" => {
                 self.run_header();
                 true
@@ -1227,13 +1235,35 @@ impl App {
         self.status = format!("ligne {}", target + 1);
     }
 
-    /// `:norm [fichier]` — lance norminette (via le module `norm`) sur le
-    /// fichier donné, ou sur le fichier de l'onglet actif à défaut, affiche le
-    /// rapport dans le panneau de sortie, construit la liste des erreurs
-    /// navigables (`:ne` / `:pe`) et saute sur la première.
+    /// `:norm [fichier]` — vérifie la Norme 42 (défaut : onglet actif), affiche
+    /// le rapport et saute sur la première erreur.
     fn run_norm(&mut self, args: &[String]) {
-        // Cible : argument explicite, sinon chemin (relatif au workspace) de
-        // l'onglet actif.
+        if let Some(total) = self.run_diagnostic("norm", args) {
+            self.status = if total == 0 {
+                "norminette : aucune erreur".to_string()
+            } else {
+                format!("norminette : {total} erreur(s) — :ne / :pe pour naviguer")
+            };
+        }
+    }
+
+    /// `:cc [fichier]` — compile aux flags 42 (défaut : onglet actif), affiche
+    /// les diagnostics et saute sur le premier.
+    fn run_cc(&mut self, args: &[String]) {
+        if let Some(total) = self.run_diagnostic("cc", args) {
+            self.status = if total == 0 {
+                "cc : compilation propre".to_string()
+            } else {
+                format!("cc : {total} diagnostic(s) — :ne / :pe pour naviguer")
+            };
+        }
+    }
+
+    /// Exécute une commande de diagnostic (`norm` / `cc`) via l'exécuteur sur un
+    /// fichier cible (argument explicite, sinon l'onglet actif), affiche la
+    /// sortie, construit la liste navigable (`:ne` / `:pe`) et saute sur le
+    /// premier diagnostic. Renvoie leur nombre, ou `None` si aucune cible.
+    fn run_diagnostic(&mut self, command: &str, args: &[String]) -> Option<usize> {
         let target = match args.first() {
             Some(arg) => arg.clone(),
             None => match self.editor().path.clone() {
@@ -1243,57 +1273,56 @@ impl App {
                     .display()
                     .to_string(),
                 None => {
-                    self.output
-                        .push("usage: :norm [fichier] — ou ouvre un fichier d'abord".to_string());
-                    return;
+                    self.output.push(format!(
+                        "usage: :{command} [fichier] — ou ouvre un fichier d'abord"
+                    ));
+                    return None;
                 }
             },
         };
 
-        // norminette lit le disque : prévenir si l'onglet courant est modifié.
+        // L'outil lit le disque : prévenir si l'onglet courant est modifié.
         if args.is_empty() && self.editor().dirty {
             self.output.push(
-                "note: modifications non sauvegardées — norminette lit la version sur disque (:w)"
+                "note: modifications non sauvegardées — lecture de la version sur disque (:w)"
                     .to_string(),
             );
         }
 
         let lines = {
             let App { ctx, executor, .. } = self;
-            match executor(ctx, "norm", std::slice::from_ref(&target)) {
+            match executor(ctx, command, std::slice::from_ref(&target)) {
                 Ok(result) => result.lines,
                 Err(err) => {
                     self.output.push(format!("error: {err}"));
-                    return;
+                    return None;
                 }
             }
         };
 
         let root = self.ctx.workspace.root.clone();
-        self.norm_errors = lines
+        self.diagnostics = lines
             .iter()
             .filter_map(|line| parse_norm_location(line))
             .map(|(file, n)| (root.join(file), n))
             .collect();
-        self.norm_idx = 0;
+        self.diag_idx = 0;
         self.output.extend(lines);
 
-        if self.norm_errors.is_empty() {
-            self.status = "norminette : aucune erreur".to_string();
-        } else {
-            let total = self.norm_errors.len();
+        let total = self.diagnostics.len();
+        if total > 0 {
             self.jump_to_error(0);
-            self.status = format!("norminette : {total} erreur(s) — :ne / :pe pour naviguer");
         }
+        Some(total)
     }
 
-    /// Place le curseur sur l'erreur norminette d'indice `idx` : ouvre son
-    /// fichier au besoin, puis saute à la ligne.
+    /// Place le curseur sur le diagnostic d'indice `idx` : ouvre son fichier au
+    /// besoin, puis saute à la ligne.
     fn jump_to_error(&mut self, idx: usize) {
-        let Some((path, line)) = self.norm_errors.get(idx).cloned() else {
+        let Some((path, line)) = self.diagnostics.get(idx).cloned() else {
             return;
         };
-        self.norm_idx = idx;
+        self.diag_idx = idx;
         if self.editor().path.as_deref() != Some(path.as_path()) {
             match Self::load_into(&path) {
                 Ok(buffer) => self.open_tab(buffer),
@@ -1305,24 +1334,24 @@ impl App {
         }
         self.goto_line(line);
         self.status = format!(
-            "erreur {}/{} — {}:{}",
+            "diagnostic {}/{} — {}:{}",
             idx + 1,
-            self.norm_errors.len(),
+            self.diagnostics.len(),
             path.display(),
             line
         );
     }
 
-    /// Navigue dans les erreurs norminette (`delta` = +1 suivant, -1 précédent),
-    /// en bouclant. Sans erreur en mémoire, invite à lancer `:norm`.
+    /// Navigue dans les diagnostics (`delta` = +1 suivant, -1 précédent), en
+    /// bouclant. Sans diagnostic en mémoire, invite à lancer `:norm` ou `:cc`.
     fn jump_error(&mut self, delta: isize) {
-        let total = self.norm_errors.len();
+        let total = self.diagnostics.len();
         if total == 0 {
             self.output
-                .push("aucune erreur norminette — lance :norm d'abord".to_string());
+                .push("aucun diagnostic — lance :norm ou :cc d'abord".to_string());
             return;
         }
-        let next = (self.norm_idx as isize + delta).rem_euclid(total as isize) as usize;
+        let next = (self.diag_idx as isize + delta).rem_euclid(total as isize) as usize;
         self.jump_to_error(next);
     }
 
@@ -2516,7 +2545,7 @@ mod tests {
 
         // Le rapport est affiché et deux erreurs sont navigables.
         assert!(app.output.iter().any(|l| l.contains("TOO_MANY_LINES")));
-        assert_eq!(app.norm_errors.len(), 2);
+        assert_eq!(app.diagnostics.len(), 2);
         // Saut automatique sur la première erreur (ligne 3 -> row 2).
         assert_eq!(app.editor().cursor_row, 2);
         assert_eq!(app.view, View::Code);
@@ -2559,7 +2588,7 @@ mod tests {
         app.input = "norm".to_string();
         app.submit();
         assert!(app.output.iter().any(|l| l.contains("usage: :norm")));
-        assert!(app.norm_errors.is_empty());
+        assert!(app.diagnostics.is_empty());
     }
 
     #[test]
@@ -2601,5 +2630,28 @@ mod tests {
         app.input = "header".to_string();
         app.submit();
         assert!(app.output.iter().any(|l| l.contains("usage: :header")));
+    }
+
+    // --- commande `cc` (compilation aux flags 42) ---
+
+    #[test]
+    fn cc_reports_and_jumps_to_first_diagnostic() {
+        let root = temp_workspace("cc-jump");
+        fs::write(root.join("bad.c"), "l1\nl2\nl3\nl4\nl5\n").unwrap();
+        let ctx = Context::with_root(&root);
+        let exec: Executor = Box::new(|_ctx, cmd, _args| {
+            assert_eq!(cmd, "cc");
+            Ok(Output::new(vec![
+                "bad.c:4:9: error: use of undeclared identifier 'x'".to_string(),
+                "1 error generated.".to_string(),
+            ]))
+        });
+        let mut app = App::new(ctx, specs(), exec, Some(PathBuf::from("bad.c")));
+        app.input = "cc".to_string();
+        app.submit();
+
+        assert_eq!(app.diagnostics.len(), 1);
+        assert_eq!(app.editor().cursor_row, 3); // ligne 4 -> row 3
+        assert!(app.output.iter().any(|l| l.contains("undeclared")));
     }
 }
