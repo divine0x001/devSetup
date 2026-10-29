@@ -79,7 +79,11 @@ const EDITOR_COMMANDS: [(&str, &str); 20] = [
 ];
 
 /// Raccourcis clavier de l'éditeur (touche, description), affichés par `:help`.
-const EDITOR_SHORTCUTS: [(&str, &str); 14] = [
+const EDITOR_SHORTCUTS: [(&str, &str); 18] = [
+    ("F2", "en-tête 42 (insère / met à jour)"),
+    ("F3", "vérifie la Norme (norminette)"),
+    ("F4", "compile le fichier courant (flags 42)"),
+    ("F5", "compile le projet et lance le test"),
     ("Ctrl-S", "sauvegarde le fichier courant"),
     ("Ctrl-Z / Ctrl-Y", "annule / rétablit"),
     ("Maj + flèches", "sélectionne du texte"),
@@ -213,6 +217,7 @@ impl App {
             "devx — VS Code dans le terminal".to_string(),
             "Tab: panneau · : commande · Ctrl-P: palette · :help: toutes les commandes · q: quitter"
                 .to_string(),
+            "42: F2 en-tête · F3 norm · F4 compile · F5 test".to_string(),
         ];
 
         let buffer = match initial_file {
@@ -532,6 +537,11 @@ impl App {
                     self.input.clear();
                     self.status = "commande (:) — Échap pour annuler".to_string();
                 }
+                // Raccourcis de la boucle 42 (sans taper `:`), quel que soit le focus.
+                KeyCode::F(2) => self.run_header(),
+                KeyCode::F(3) => self.run_norm(&[]),
+                KeyCode::F(4) => self.run_cc(&[]),
+                KeyCode::F(5) => self.run_test(&[]),
                 KeyCode::Tab if self.focus == Focus::Editor => {
                     self.editor_mut().insert_tab(EDITOR_TAB);
                 }
@@ -2787,5 +2797,66 @@ mod tests {
         assert_eq!(app.diagnostics.len(), 1);
         assert_eq!(app.editor().cursor_row, 3); // ligne 4 -> row 3
         assert!(app.output.iter().any(|l| l.contains("undeclared")));
+    }
+
+    // --- raccourcis clavier de la boucle 42 (F2..F5) ---
+
+    fn press(app: &mut App, code: KeyCode) {
+        app.on_key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    #[test]
+    fn f3_shortcut_runs_norm() {
+        let (mut app, _root) = app_with_norm(
+            "f3-norm",
+            "l1\nl2\nl3\nl4\nl5\n",
+            vec!["bad.c:3:1: TOO_MANY_LINES — trop long".to_string()],
+        );
+        press(&mut app, KeyCode::F(3));
+        assert_eq!(app.diagnostics.len(), 1);
+        assert_eq!(app.editor().cursor_row, 2); // ligne 3 -> row 2
+    }
+
+    #[test]
+    fn f4_shortcut_runs_cc() {
+        let root = temp_workspace("f4-cc");
+        fs::write(root.join("bad.c"), "l1\nl2\nl3\nl4\nl5\n").unwrap();
+        let ctx = Context::with_root(&root);
+        let exec: Executor = Box::new(|_ctx, cmd, _args| {
+            assert_eq!(cmd, "cc");
+            Ok(Output::new(vec!["bad.c:2:1: error: boom".to_string()]))
+        });
+        let mut app = App::new(ctx, specs(), exec, Some(PathBuf::from("bad.c")));
+        press(&mut app, KeyCode::F(4));
+        assert_eq!(app.diagnostics.len(), 1);
+        assert_eq!(app.editor().cursor_row, 1); // ligne 2 -> row 1
+    }
+
+    #[test]
+    fn f2_shortcut_runs_header() {
+        let root = temp_workspace("f2-header");
+        fs::write(root.join("main.c"), "int main(void){}\n").unwrap();
+        let ctx = Context::with_root(&root);
+        let exec: Executor = Box::new(|ctx, cmd, args| {
+            assert_eq!(cmd, "header");
+            let p = ctx.workspace.root.join(&args[0]);
+            let orig = fs::read_to_string(&p).unwrap_or_default();
+            fs::write(&p, format!("/* HEADER */\n{orig}")).unwrap();
+            Ok(Output::new(vec!["header ajouté".to_string()]))
+        });
+        let mut app = App::new(ctx, specs(), exec, Some(PathBuf::from("main.c")));
+        press(&mut app, KeyCode::F(2));
+        assert_eq!(app.editor().lines[0], "/* HEADER */");
+    }
+
+    #[test]
+    fn f5_shortcut_wired_to_test() {
+        // Sans source .c, :test échoue à générer le Makefile : prouve le câblage.
+        let root = temp_workspace("f5-test");
+        let ctx = Context::with_root(&root);
+        let exec: Executor = Box::new(|_ctx, _cmd, _args| Ok(Output::empty()));
+        let mut app = App::new(ctx, specs(), exec, None);
+        press(&mut app, KeyCode::F(5));
+        assert!(app.output.iter().any(|l| l.contains("aucune source")));
     }
 }
