@@ -35,9 +35,14 @@ const MAX_DEPTH: usize = 6;
 const MAX_ENTRIES: usize = 20_000;
 
 /// Commandes éditeur disponibles dans le mode `:` (nom, description).
-const EDITOR_COMMANDS: [(&str, &str); 16] = [
+const EDITOR_COMMANDS: [(&str, &str); 18] = [
     (":help", "liste toutes les commandes disponibles"),
     (":<n> | :goto <n>", "place le curseur sur la ligne n"),
+    (
+        ":norm [fichier]",
+        "vérifie la Norme 42 (défaut : fichier courant)",
+    ),
+    (":ne | :pe", "erreur norminette suivante / précédente"),
     (":w", "sauvegarde le fichier courant"),
     (":wq", "sauvegarde puis quitte"),
     (":wa", "sauvegarde tous les onglets modifiés"),
@@ -171,6 +176,11 @@ pub struct App {
     pub git: GitState,
     /// Géométrie du dernier rendu (carte pour la souris).
     pub layout: LayoutInfo,
+    /// Erreurs norminette du dernier `:norm` `(fichier absolu, ligne 1-based)`,
+    /// dans l'ordre d'affichage ; alimente `:ne` / `:pe`.
+    pub norm_errors: Vec<(PathBuf, usize)>,
+    /// Index de l'erreur norminette courante dans `norm_errors`.
+    pub norm_idx: usize,
     executor: Executor,
 }
 
@@ -234,6 +244,8 @@ impl App {
             view: View::Code,
             git: GitState::default(),
             layout: LayoutInfo::default(),
+            norm_errors: Vec::new(),
+            norm_idx: 0,
             executor,
         }
     }
@@ -1007,6 +1019,18 @@ impl App {
                 }
                 true
             }
+            "norm" | "norminette" => {
+                self.run_norm(args);
+                true
+            }
+            "ne" => {
+                self.jump_error(1);
+                true
+            }
+            "pe" => {
+                self.jump_error(-1);
+                true
+            }
             "help" => {
                 for line in self.help_text() {
                     self.output.push(line);
@@ -1198,6 +1222,105 @@ impl App {
         self.focus = Focus::Editor;
         self.status = format!("ligne {}", target + 1);
     }
+
+    /// `:norm [fichier]` — lance norminette (via le module `norm`) sur le
+    /// fichier donné, ou sur le fichier de l'onglet actif à défaut, affiche le
+    /// rapport dans le panneau de sortie, construit la liste des erreurs
+    /// navigables (`:ne` / `:pe`) et saute sur la première.
+    fn run_norm(&mut self, args: &[String]) {
+        // Cible : argument explicite, sinon chemin (relatif au workspace) de
+        // l'onglet actif.
+        let target = match args.first() {
+            Some(arg) => arg.clone(),
+            None => match self.editor().path.clone() {
+                Some(path) => path
+                    .strip_prefix(&self.ctx.workspace.root)
+                    .unwrap_or(&path)
+                    .display()
+                    .to_string(),
+                None => {
+                    self.output
+                        .push("usage: :norm [fichier] — ou ouvre un fichier d'abord".to_string());
+                    return;
+                }
+            },
+        };
+
+        // norminette lit le disque : prévenir si l'onglet courant est modifié.
+        if args.is_empty() && self.editor().dirty {
+            self.output.push(
+                "note: modifications non sauvegardées — norminette lit la version sur disque (:w)"
+                    .to_string(),
+            );
+        }
+
+        let lines = {
+            let App { ctx, executor, .. } = self;
+            match executor(ctx, "norm", std::slice::from_ref(&target)) {
+                Ok(result) => result.lines,
+                Err(err) => {
+                    self.output.push(format!("error: {err}"));
+                    return;
+                }
+            }
+        };
+
+        let root = self.ctx.workspace.root.clone();
+        self.norm_errors = lines
+            .iter()
+            .filter_map(|line| parse_norm_location(line))
+            .map(|(file, n)| (root.join(file), n))
+            .collect();
+        self.norm_idx = 0;
+        self.output.extend(lines);
+
+        if self.norm_errors.is_empty() {
+            self.status = "norminette : aucune erreur".to_string();
+        } else {
+            let total = self.norm_errors.len();
+            self.jump_to_error(0);
+            self.status = format!("norminette : {total} erreur(s) — :ne / :pe pour naviguer");
+        }
+    }
+
+    /// Place le curseur sur l'erreur norminette d'indice `idx` : ouvre son
+    /// fichier au besoin, puis saute à la ligne.
+    fn jump_to_error(&mut self, idx: usize) {
+        let Some((path, line)) = self.norm_errors.get(idx).cloned() else {
+            return;
+        };
+        self.norm_idx = idx;
+        if self.editor().path.as_deref() != Some(path.as_path()) {
+            match Self::load_into(&path) {
+                Ok(buffer) => self.open_tab(buffer),
+                Err(err) => {
+                    self.output.push(format!("error: {err}"));
+                    return;
+                }
+            }
+        }
+        self.goto_line(line);
+        self.status = format!(
+            "erreur {}/{} — {}:{}",
+            idx + 1,
+            self.norm_errors.len(),
+            path.display(),
+            line
+        );
+    }
+
+    /// Navigue dans les erreurs norminette (`delta` = +1 suivant, -1 précédent),
+    /// en bouclant. Sans erreur en mémoire, invite à lancer `:norm`.
+    fn jump_error(&mut self, delta: isize) {
+        let total = self.norm_errors.len();
+        if total == 0 {
+            self.output
+                .push("aucune erreur norminette — lance :norm d'abord".to_string());
+            return;
+        }
+        let next = (self.norm_idx as isize + delta).rem_euclid(total as isize) as usize;
+        self.jump_to_error(next);
+    }
 }
 
 /// Vrai si la position `(x, y)` tombe dans `area` (bordure comprise).
@@ -1263,6 +1386,21 @@ fn common_prefix(items: &[String]) -> String {
         len = len.min(common);
     }
     first[..len].iter().collect()
+}
+
+/// Extrait `(fichier, ligne)` d'une ligne de diagnostic au format
+/// `fichier:ligne:col: …` produit par le module `norm`. Renvoie `None` pour les
+/// lignes d'état (`fichier: OK`), de résumé ou sans numéro de ligne exploitable.
+fn parse_norm_location(line: &str) -> Option<(String, usize)> {
+    let mut parts = line.splitn(4, ':');
+    let file = parts.next()?.trim();
+    let line_no: usize = parts.next()?.trim().parse().ok()?;
+    parts.next()?; // colonne
+    parts.next()?; // reste (": …") : garantit le format diagnostic complet
+    if file.is_empty() || line_no == 0 {
+        return None;
+    }
+    Some((file.to_string(), line_no))
 }
 
 /// Découpe une ligne de commande `:` en (commande, arguments).
@@ -2274,5 +2412,106 @@ mod tests {
         assert!(joined.contains(":next"));
         assert!(joined.contains(":prev"));
         assert!(joined.contains(":close"));
+    }
+
+    // --- commande `norm` (norminette) ---
+
+    #[test]
+    fn parse_norm_location_reads_file_and_line() {
+        assert_eq!(
+            parse_norm_location("src/main.c:12:5: TOO_MANY_LINES — trop long"),
+            Some(("src/main.c".to_string(), 12))
+        );
+        // Lignes d'état / résumé / incomplètes : pas de cible.
+        assert_eq!(parse_norm_location("ft_putchar.c: OK"), None);
+        assert_eq!(parse_norm_location("norminette: OK — 2 fichier(s)"), None);
+        assert_eq!(parse_norm_location("src/main.c:0:1: X"), None);
+        assert_eq!(parse_norm_location(""), None);
+    }
+
+    /// Construit une app dont l'onglet actif est `file` (déjà sur disque dans un
+    /// workspace temporaire), avec un exécuteur qui renvoie `norm_lines` pour la
+    /// commande `norm`.
+    fn app_with_norm(tag: &str, contents: &str, norm_lines: Vec<String>) -> (App, PathBuf) {
+        let root = temp_workspace(tag);
+        fs::write(root.join("bad.c"), contents).unwrap();
+        let ctx = Context::with_root(&root);
+        let exec: Executor = Box::new(move |_ctx, cmd, _args| {
+            assert_eq!(cmd, "norm");
+            Ok(Output::new(norm_lines.clone()))
+        });
+        let app = App::new(ctx, specs(), exec, Some(PathBuf::from("bad.c")));
+        (app, root)
+    }
+
+    #[test]
+    fn norm_reports_and_jumps_to_first_error() {
+        let (mut app, _root) = app_with_norm(
+            "norm-jump",
+            "l1\nl2\nl3\nl4\nl5\n",
+            vec![
+                "bad.c:3:1: TOO_MANY_LINES — trop long".to_string(),
+                "bad.c:5:1: SPACE_REPLACE_TAB — tab attendu".to_string(),
+                String::new(),
+                "norminette: 2 erreur(s), 0 notice(s) — 1 fichier(s)".to_string(),
+            ],
+        );
+        app.input = "norm".to_string();
+        app.submit();
+
+        // Le rapport est affiché et deux erreurs sont navigables.
+        assert!(app.output.iter().any(|l| l.contains("TOO_MANY_LINES")));
+        assert_eq!(app.norm_errors.len(), 2);
+        // Saut automatique sur la première erreur (ligne 3 -> row 2).
+        assert_eq!(app.editor().cursor_row, 2);
+        assert_eq!(app.view, View::Code);
+        assert_eq!(app.focus, Focus::Editor);
+    }
+
+    #[test]
+    fn norm_next_and_prev_cycle_through_errors() {
+        let (mut app, _root) = app_with_norm(
+            "norm-cycle",
+            "l1\nl2\nl3\nl4\nl5\n",
+            vec![
+                "bad.c:3:1: A — x".to_string(),
+                "bad.c:5:1: B — y".to_string(),
+            ],
+        );
+        app.input = "norm".to_string();
+        app.submit();
+        assert_eq!(app.editor().cursor_row, 2); // erreur 1 (ligne 3)
+
+        app.input = "ne".to_string();
+        app.submit();
+        assert_eq!(app.editor().cursor_row, 4); // erreur 2 (ligne 5)
+
+        app.input = "ne".to_string();
+        app.submit();
+        assert_eq!(app.editor().cursor_row, 2); // boucle -> erreur 1
+
+        app.input = "pe".to_string();
+        app.submit();
+        assert_eq!(app.editor().cursor_row, 4); // boucle arrière -> erreur 2
+    }
+
+    #[test]
+    fn norm_without_file_shows_usage() {
+        let root = temp_workspace("norm-nofile");
+        let ctx = Context::with_root(&root);
+        let exec: Executor = Box::new(|_ctx, _cmd, _args| Ok(Output::empty()));
+        let mut app = App::new(ctx, specs(), exec, None);
+        app.input = "norm".to_string();
+        app.submit();
+        assert!(app.output.iter().any(|l| l.contains("usage: :norm")));
+        assert!(app.norm_errors.is_empty());
+    }
+
+    #[test]
+    fn next_error_without_norm_hints_to_run_it() {
+        let mut app = app();
+        app.input = "ne".to_string();
+        app.submit();
+        assert!(app.output.iter().any(|l| l.contains(":norm")));
     }
 }

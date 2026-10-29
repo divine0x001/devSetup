@@ -10,6 +10,7 @@
 //! - `replace <pattern> <replacement>` : remplacement regex projet-wide
 //!   (respecte `.gitignore`, ignore les binaires).
 //! - `outline <file>` : symboles de premier niveau d'un fichier source.
+//! - `norm [chemin...]` : vérifie la Norme 42 via `norminette`.
 //!
 //! Aucune logique TUI n'est présente ici : uniquement de la logique pure et des
 //! appels `std::process::Command`.
@@ -17,6 +18,7 @@
 #![forbid(unsafe_code)]
 
 mod git;
+mod norm;
 mod outline;
 mod replace;
 mod run;
@@ -81,6 +83,12 @@ impl Module for ToolsModule {
                 "outline <file>",
             )
             .with_aliases(["symbols"]),
+            CommandSpec::new(
+                "norm",
+                "Vérifie la Norme 42 avec norminette (fichier, dossier ou projet)",
+                "norm [chemin...]",
+            )
+            .with_aliases(["norminette"]),
         ]
     }
 
@@ -92,6 +100,7 @@ impl Module for ToolsModule {
             "session" | "sess" => session::execute(ctx, args),
             "replace" | "sub" => replace::execute(ctx, args),
             "outline" | "symbols" => outline::execute(ctx, args),
+            "norm" | "norminette" => norm::execute(ctx, args),
             other => Err(DevxError::unknown_command(other)),
         }
     }
@@ -119,7 +128,7 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            vec!["git", "run", "snip", "session", "replace", "outline"]
+            vec!["git", "run", "snip", "session", "replace", "outline", "norm"]
         );
     }
 
