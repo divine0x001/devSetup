@@ -12,6 +12,8 @@ use ratatui::layout::Rect;
 
 use crate::editor::Buffer;
 use crate::git::load_git;
+use crate::project;
+use crate::term::Terminal;
 use crate::tree::{expanded_paths, flatten, restore_expanded, scan_dir, set_expanded_by_path};
 
 pub use crate::git::GitState;
@@ -35,7 +37,7 @@ const MAX_DEPTH: usize = 6;
 const MAX_ENTRIES: usize = 20_000;
 
 /// Commandes éditeur disponibles dans le mode `:` (nom, description).
-const EDITOR_COMMANDS: [(&str, &str); 19] = [
+const EDITOR_COMMANDS: [(&str, &str); 20] = [
     (":help", "liste toutes les commandes disponibles"),
     (":<n> | :goto <n>", "place le curseur sur la ligne n"),
     (
@@ -47,6 +49,10 @@ const EDITOR_COMMANDS: [(&str, &str); 19] = [
         "compile aux flags 42 (défaut : fichier courant)",
     ),
     (":ne | :pe", "diagnostic suivant / précédent (norm, cc)"),
+    (
+        ":test [args]",
+        "compile et lance le binaire dans un terminal (Ctrl-Q ferme)",
+    ),
     (":w", "sauvegarde le fichier courant"),
     (":wq", "sauvegarde puis quitte"),
     (":wa", "sauvegarde tous les onglets modifiés"),
@@ -119,6 +125,8 @@ pub enum View {
     Code,
     /// Vue « git » : branche, statut et derniers commits.
     Git,
+    /// Vue « test » : terminal embarqué exécutant le binaire compilé.
+    Test,
 }
 
 /// Géométrie du dernier rendu, utilisée pour la souris (carte de zones).
@@ -185,6 +193,8 @@ pub struct App {
     pub diagnostics: Vec<(PathBuf, usize)>,
     /// Index du diagnostic courant dans `diagnostics`.
     pub diag_idx: usize,
+    /// Terminal embarqué de la vue test (binaire en cours), le cas échéant.
+    pub terminal: Option<Terminal>,
     executor: Executor,
 }
 
@@ -250,6 +260,7 @@ impl App {
             layout: LayoutInfo::default(),
             diagnostics: Vec::new(),
             diag_idx: 0,
+            terminal: None,
             executor,
         }
     }
@@ -371,6 +382,13 @@ impl App {
     /// Traite un événement clavier.
     pub fn on_key(&mut self, key: KeyEvent) {
         if key.kind == KeyEventKind::Release {
+            return;
+        }
+
+        // En vue test, le terminal capte toutes les frappes (y compris Ctrl-C,
+        // destiné au binaire). Ctrl-Q est l'unique échappatoire vers la vue code.
+        if self.view == View::Test {
+            self.on_key_terminal(key);
             return;
         }
 
@@ -666,7 +684,7 @@ impl App {
     pub fn toggle_view(&mut self) {
         match self.view {
             View::Code => self.open_git_view(),
-            View::Git => self.open_code_view(),
+            View::Git | View::Test => self.open_code_view(),
         }
     }
 
@@ -1033,6 +1051,10 @@ impl App {
             }
             "header" | "stdheader" => {
                 self.run_header();
+                true
+            }
+            "test" => {
+                self.run_test(args);
                 true
             }
             "ne" => {
@@ -1404,6 +1426,118 @@ impl App {
         self.output.extend(lines);
         self.refresh_tree();
         self.status = "en-tête 42 appliqué".to_string();
+    }
+
+    /// `:test [args]` — garantit un Makefile (généré si absent), compile via
+    /// `make`, puis lance le binaire produit dans un terminal embarqué avec
+    /// `args`, en basculant sur la vue test.
+    fn run_test(&mut self, args: &[String]) {
+        let root = self.ctx.workspace.root.clone();
+
+        match project::ensure_makefile(&root) {
+            Ok((path, generated)) => {
+                if generated {
+                    self.output
+                        .push(format!("Makefile généré: {}", path.display()));
+                }
+            }
+            Err(err) => {
+                self.output.push(format!("error: {err}"));
+                return;
+            }
+        }
+
+        // Compilation (synchrone : les projets 42 compilent vite).
+        match std::process::Command::new("make")
+            .current_dir(&root)
+            .output()
+        {
+            Ok(out) => {
+                for line in String::from_utf8_lossy(&out.stdout).lines() {
+                    self.output.push(line.to_string());
+                }
+                for line in String::from_utf8_lossy(&out.stderr).lines() {
+                    self.output.push(line.to_string());
+                }
+                if !out.status.success() {
+                    self.output
+                        .push("build échoué — test annulé (corrige la compilation)".to_string());
+                    return;
+                }
+            }
+            Err(err) => {
+                self.output
+                    .push(format!("error: impossible de lancer make: {err}"));
+                return;
+            }
+        }
+
+        let bin = project::binary_target(&root);
+        let bin_path = root.join(&bin);
+        if !bin_path.is_file() {
+            self.output
+                .push(format!("binaire introuvable après build: {bin}"));
+            return;
+        }
+
+        // Taille initiale provisoire ; le premier rendu ajustera au panneau.
+        match Terminal::spawn(&bin_path, args, &root, 24, 80) {
+            Ok(terminal) => {
+                self.terminal = Some(terminal);
+                self.view = View::Test;
+                self.status = format!("test: {bin} en cours — Ctrl-Q pour fermer");
+            }
+            Err(err) => self.output.push(format!("error: lancement du test: {err}")),
+        }
+    }
+
+    /// Frappes en vue test : Ctrl-Q ferme ; une fois le binaire terminé,
+    /// Entrée/Échap/q ferment aussi ; sinon tout est transmis au binaire.
+    fn on_key_terminal(&mut self, key: KeyEvent) {
+        let ctrl_q =
+            key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('q');
+        let finished = self
+            .terminal
+            .as_ref()
+            .map(Terminal::finished)
+            .unwrap_or(true);
+        if ctrl_q
+            || (finished && matches!(key.code, KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q')))
+        {
+            self.close_test();
+            return;
+        }
+        if let Some(terminal) = self.terminal.as_mut() {
+            terminal.send_key(key);
+        }
+    }
+
+    /// Ferme la vue test : tue le binaire s'il tourne encore et revient au code.
+    fn close_test(&mut self) {
+        if let Some(mut terminal) = self.terminal.take() {
+            terminal.kill();
+        }
+        self.open_code_view();
+        self.status = "test fermé".to_string();
+    }
+
+    /// Ajuste la taille du terminal embarqué au panneau (appelé au rendu).
+    pub fn resize_terminal(&mut self, rows: u16, cols: u16) {
+        if let Some(terminal) = self.terminal.as_mut() {
+            terminal.resize(rows, cols);
+        }
+    }
+
+    /// Draine la sortie du terminal embarqué (appelé à chaque tour de boucle).
+    pub fn tick(&mut self) {
+        if let Some(terminal) = self.terminal.as_mut() {
+            terminal.pump();
+        }
+    }
+
+    /// Vrai si un terminal embarqué est actif (boucle d'événements plus réactive).
+    pub fn has_terminal(&self) -> bool {
+        self.terminal.is_some()
     }
 }
 

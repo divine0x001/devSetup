@@ -15,6 +15,8 @@
 mod app;
 mod editor;
 mod git;
+mod project;
+mod term;
 mod tree;
 mod ui;
 
@@ -62,11 +64,20 @@ pub fn run_ide(
     let mut app = App::new(ctx, specs, exec, initial_file);
 
     while !app.should_quit {
+        // Draine la sortie du terminal embarqué avant de dessiner.
+        app.tick();
+
         terminal
             .draw(|frame| ui::draw(frame, &mut app))
             .map_err(to_err)?;
 
-        if event::poll(Duration::from_millis(200)).map_err(to_err)? {
+        // Boucle plus réactive quand un terminal embarqué est actif (sortie live).
+        let timeout = if app.has_terminal() {
+            Duration::from_millis(16)
+        } else {
+            Duration::from_millis(200)
+        };
+        if event::poll(timeout).map_err(to_err)? {
             match event::read().map_err(to_err)? {
                 Event::Key(key) => app.on_key(key),
                 Event::Mouse(mouse) => app.on_mouse(mouse),

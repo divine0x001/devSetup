@@ -1,7 +1,7 @@
 //! Rendu des widgets de la TUI (IDE).
 
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
@@ -45,6 +45,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             // En vue git, aucun clic éditeur : on neutralise la zone.
             app.layout.editor = Rect::default();
             draw_git(frame, body[1], app);
+        }
+        View::Test => {
+            // En vue test, aucun clic éditeur : on neutralise la zone.
+            app.layout.editor = Rect::default();
+            draw_test(frame, body[1], app);
         }
     }
 
@@ -477,6 +482,101 @@ fn build_editor_lines(
     out
 }
 
+/// Dessine la vue test : l'écran du terminal embarqué dans un cadre.
+fn draw_test(frame: &mut Frame, area: Rect, app: &mut App) {
+    let title = match app.terminal.as_ref() {
+        Some(term) => match term.exit_code() {
+            Some(code) => format!(
+                " test — {} [terminé: {code}] — Entrée/Ctrl-Q ferme ",
+                term.cmdline
+            ),
+            None => format!(" test — {} — Ctrl-Q ferme ", term.cmdline),
+        },
+        None => " test ".to_string(),
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+    // Ajuste le PTY au panneau, puis rend l'écran émulé.
+    app.resize_terminal(inner.height, inner.width);
+    let Some(term) = app.terminal.as_ref() else {
+        return;
+    };
+    let screen = term.screen();
+
+    {
+        let buf = frame.buffer_mut();
+        for row in 0..inner.height {
+            for col in 0..inner.width {
+                let Some(cell) = screen.cell(row, col) else {
+                    continue;
+                };
+                let Some(target) = buf.cell_mut((inner.x + col, inner.y + row)) else {
+                    continue;
+                };
+                let contents = cell.contents();
+                if contents.is_empty() {
+                    target.set_symbol(" ");
+                } else {
+                    target.set_symbol(&contents);
+                }
+                target.set_style(vt_style(cell));
+            }
+        }
+    }
+
+    // Curseur du binaire, tant qu'il tourne.
+    if !term.finished() && !screen.hide_cursor() {
+        let (cr, cc) = screen.cursor_position();
+        if cr < inner.height && cc < inner.width {
+            frame.set_cursor_position(Position {
+                x: inner.x + cc,
+                y: inner.y + cr,
+            });
+        }
+    }
+}
+
+/// Convertit le style d'une cellule vt100 en style ratatui.
+fn vt_style(cell: &vt100::Cell) -> Style {
+    let mut style = Style::default();
+    if let Some(fg) = vt_color(cell.fgcolor()) {
+        style = style.fg(fg);
+    }
+    if let Some(bg) = vt_color(cell.bgcolor()) {
+        style = style.bg(bg);
+    }
+    if cell.bold() {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    if cell.italic() {
+        style = style.add_modifier(Modifier::ITALIC);
+    }
+    if cell.underline() {
+        style = style.add_modifier(Modifier::UNDERLINED);
+    }
+    if cell.inverse() {
+        style = style.add_modifier(Modifier::REVERSED);
+    }
+    style
+}
+
+/// Convertit une couleur vt100 en couleur ratatui (`None` = défaut du terminal).
+fn vt_color(color: vt100::Color) -> Option<Color> {
+    match color {
+        vt100::Color::Default => None,
+        vt100::Color::Idx(i) => Some(Color::Indexed(i)),
+        vt100::Color::Rgb(r, g, b) => Some(Color::Rgb(r, g, b)),
+    }
+}
+
 fn draw_output(frame: &mut Frame, area: Rect, app: &App) {
     let inner = area.height.saturating_sub(2) as usize;
     let start = app.output.len().saturating_sub(inner.max(1));
@@ -542,6 +642,10 @@ fn draw_hint(frame: &mut Frame, area: Rect, app: &App) {
         _ => match app.view {
             View::Git => {
                 "vue git · :code: revenir au code · Ctrl-G: basculer · : : commande · q (arbre): quitter"
+                    .to_string()
+            }
+            View::Test => {
+                "vue test · le binaire reçoit tes frappes · Ctrl-Q: fermer et revenir au code"
                     .to_string()
             }
             View::Code => match app.focus {

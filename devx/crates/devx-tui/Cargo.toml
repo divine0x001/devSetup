@@ -9,3 +9,8 @@ description = "Shell terminal interactif pour devx (ratatui + crossterm)."
 devx-core.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
+portable-pty.workspace = true
+vt100.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
